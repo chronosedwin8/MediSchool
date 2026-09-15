@@ -1,11 +1,16 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
+import { SITE } from '@/lib/site';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE.url),
   title: { default: 'MediSchool — Enfermería escolar', template: '%s · MediSchool' },
-  description: 'Sistema de Gestión de Enfermería Escolar',
+  description: SITE.description,
+  applicationName: SITE.name,
+  category: 'health',
+  formatDetection: { telephone: false },
   manifest: '/manifest.webmanifest',
   icons: { icon: '/icon.svg', apple: '/icon.svg' },
   appleWebApp: { capable: true, title: 'MediSchool', statusBarStyle: 'default' },

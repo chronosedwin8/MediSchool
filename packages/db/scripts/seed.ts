@@ -726,6 +726,46 @@ async function seedRealTenant() {
   }
 }
 
+/**
+ * Institutional administrator of the real school, read from the environment so
+ * credentials never live in the repository:
+ *   SCHOOL_EMAIL_DOMAIN, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, SEED_ADMIN_FIRST_NAME, SEED_ADMIN_LAST_NAME
+ * Idempotent: creates the user once; an existing user keeps its current password.
+ */
+async function seedRealAdmin() {
+  const tenant = await prisma.tenant.findUniqueOrThrow({ where: { slug: 'colegio-aleman' } });
+  const domain = process.env.SCHOOL_EMAIL_DOMAIN?.trim().toLowerCase();
+  if (domain) {
+    const settings = { ...((tenant.settings as Record<string, unknown>) ?? {}), institutionalEmailDomain: domain };
+    await prisma.tenant.update({ where: { id: tenant.id }, data: { settings: settings as Prisma.InputJsonValue } });
+    console.log(`  ✓ dominio institucional: @${domain}`);
+  }
+  const email = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.SEED_ADMIN_PASSWORD;
+  if (!email || !password) return;
+  if (password.length < 10) throw new Error('SEED_ADMIN_PASSWORD debe tener al menos 10 caracteres');
+  const existing = await prisma.user.findFirst({ where: { tenantId: tenant.id, email }, include: { roles: true } });
+  if (existing) {
+    if (!existing.roles.some((r) => r.role === 'ADMIN')) await prisma.userRole.create({ data: { tenantId: tenant.id, userId: existing.id, role: 'ADMIN' } });
+    console.log(`  · administrador ${email} ya existe (se conserva su contraseña)`);
+    return;
+  }
+  const user = await prisma.user.create({
+    data: {
+      tenantId: tenant.id,
+      email,
+      passwordHash: hashSecret(password),
+      firstName: process.env.SEED_ADMIN_FIRST_NAME ?? 'Administrador',
+      lastName: process.env.SEED_ADMIN_LAST_NAME ?? 'Institucional',
+      mustChangePassword: false,
+      roles: { create: [{ tenantId: tenant.id, role: 'ADMIN' }] },
+      preference: { create: { tenantId: tenant.id, channels: { IN_APP: true, EMAIL: true } } },
+    },
+  });
+  await prisma.auditLog.create({ data: { tenantId: tenant.id, action: 'seed.admin_created', entity: 'user', entityId: user.id, actorRole: 'SYSTEM' } });
+  console.log(`  ✓ administrador institucional ${email}`);
+}
+
 async function seedRealLinks() {
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { slug: 'colegio-aleman' } });
   const tenantId = tenant.id;
@@ -769,7 +809,12 @@ async function main() {
     await seedRealLinks();
     return;
   }
+  if (args.has('--admin')) {
+    await seedRealAdmin();
+    return;
+  }
   await seedRealTenant();
+  await seedRealAdmin();
   if (!args.has('--no-demo')) await seedDemoTenant();
   console.log(`\nContraseña de las cuentas demo: ${DEMO_PASSWORD}`);
 }

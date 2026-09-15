@@ -11,3 +11,4 @@
 | [0007](0007-phidias-integration.md) | Integración Phidias idempotente con hash de contenido y propiedad de campos | Aceptada |
 | [0008](0008-pdf-and-clinical-catalogs.md) | PDFs con pdfkit; CIE-10 curado; tablas OMS oficiales | Aceptada |
 | [0009](0009-prn-orders.md) | PRN modelado como solicitud de medicación con `is_prn` | Aceptada |
+| [0010](0010-public-site-and-help-center.md) | Sitio público con SEO y centro de ayuda en Markdown | Aceptada |

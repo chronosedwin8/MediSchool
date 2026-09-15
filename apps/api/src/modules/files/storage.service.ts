@@ -175,18 +175,16 @@ export class PhotoService {
     return null;
   }
 
-  async signedUrl(photoKey: string | null, code: string, force = false): Promise<string | null> {
-    if (!this.enabled) return null;
-    const cached = this.cache.get(code);
+  /**
+   * Signed URL for a photo previously linked by the Phidias photo sync. Never probes the bucket
+   * by code: another school (or the demo tenant) may reuse a code that belongs to a real student.
+   */
+  async signedUrl(photoKey: string | null, _code?: string, force = false): Promise<string | null> {
+    if (!this.enabled || !photoKey) return null;
+    const cached = this.cache.get(photoKey);
     if (!force && cached && cached.expires > Date.now()) return cached.url;
-    let key = photoKey;
-    if (!key) key = (await this.find(code))?.key ?? null;
-    if (!key) {
-      this.cache.set(code, { url: null, key: null, expires: Date.now() + 60_000 });
-      return null;
-    }
-    const url = await getSignedUrl(this.client(), new GetObjectCommand({ Bucket: config().S3_PHOTOS_BUCKET!, Key: key }), { expiresIn: 3600 });
-    this.cache.set(code, { url, key, expires: Date.now() + 55 * 60_000 });
+    const url = await getSignedUrl(this.client(), new GetObjectCommand({ Bucket: config().S3_PHOTOS_BUCKET!, Key: photoKey }), { expiresIn: 3600 });
+    this.cache.set(photoKey, { url, key: photoKey, expires: Date.now() + 55 * 60_000 });
     return url;
   }
 }

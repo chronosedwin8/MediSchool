@@ -275,7 +275,7 @@ export class PeopleService {
             id: s.id,
             code: s.code,
             name: personName(s.person),
-            photoUrl: s.person.photoKey || this.photos.enabled ? `/api/v1/students/${s.id}/photo` : null,
+            photoUrl: s.person.photoKey && this.photos.enabled ? `/api/v1/students/${s.id}/photo` : null,
             medicalAlert: s.person.allergies.length > 0 || s.person.conditions.length > 0,
             openPass: s.passes[0] ? { id: s.passes[0].id, state: s.passes[0].state, label: PASS_STATE_LABELS[s.passes[0].state as PassState], requestedAt: s.passes[0].requestedAt } : null,
           })),

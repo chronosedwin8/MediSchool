@@ -34,6 +34,26 @@ npm run dev                     # API http://localhost:4000 · Web http://localh
 
 Documentación interactiva de la API: http://localhost:4000/api/docs
 
+### Sitio público y centro de ayuda
+
+- **Página de inicio** (`/`): presentación del producto para colegios, optimizada para SEO (metadatos, Open Graph, datos estructurados SoftwareApplication/FAQ, `sitemap.xml`, `robots.txt`).
+- **Centro de ayuda** (`/ayuda`): wiki con 38 guías por rol y por módulo, con búsqueda. El contenido está en Markdown en [apps/web/content/ayuda](apps/web/content/ayuda).
+- **Capturas de pantalla** de la ayuda: `node scripts/capture-screenshots.mjs` (usa solo el colegio demo y bloquea las fotos de estudiantes).
+- La aplicación autenticada no se indexa (`X-Robots-Tag: noindex`); la app instalada abre en `/panel`.
+- Variable `PUBLIC_SITE_URL`: URL pública para canonical, sitemap y Open Graph. `NEXT_PUBLIC_CONTACT_EMAIL` (opcional) muestra el botón *Solicitar una demostración*.
+
+### Administrador institucional
+
+El seed crea el administrador del colegio real a partir de variables de entorno (nunca en el repositorio): `SCHOOL_EMAIL_DOMAIN`, `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `SEED_ADMIN_FIRST_NAME`, `SEED_ADMIN_LAST_NAME`. Para aplicarlo a una base existente: `npm run seed -w @sgee/db -- --admin`.
+
+### Docker
+
+```bash
+docker compose -f infra/docker-compose.yml --env-file .env up -d --build
+```
+
+Puertos del host configurables para convivir con un PostgreSQL local y los servidores de desarrollo: `SGEE_DB_PORT` (5433), `SGEE_API_PORT` (4000) y `SGEE_WEB_PORT` (3100).
+
 ### Cuentas de demostración (contraseña `MediSchool2026!`)
 
 | Rol | Colegio real (`colegio-aleman`) | Colegio demo (`colegio-demo`, 1 500 estudiantes) |
@@ -45,7 +65,7 @@ Documentación interactiva de la API: http://localhost:4000/api/docs
 | Padre / acudiente | padre@colegio-aleman.test | padre@colegio-demo.test |
 | Portería | porteria@colegio-aleman.test · kiosco `PORTERIA-1` / PIN `2468` | porteria@colegio-demo.test |
 | Directivo | directivo@colegio-aleman.test | directivo@colegio-demo.test |
-| Administrador | admin@colegio-aleman.test | admin@colegio-demo.test |
+| Administrador | admin@colegio-aleman.test (el administrador institucional real se define con `SEED_ADMIN_*`) | admin@colegio-demo.test |
 | Superadmin | superadmin@colegio-aleman.test | — |
 
 ## Pruebas

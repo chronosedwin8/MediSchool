@@ -22,7 +22,7 @@ export function studentSummary(s: { id: string; code: string; status: string; pe
     group: s.group ? { id: s.group.id, name: s.group.name } : null,
     grade: s.group?.grade ? { id: s.group.grade.id, name: s.group.grade.name } : null,
     section: s.group?.grade?.section ? { id: s.group.grade.section.id, name: s.group.grade.section.name, code: s.group.grade.section.code } : null,
-    photoUrl: s.person.photoKey || opts.photosEnabled ? `/api/v1/students/${s.id}/photo` : null,
+    photoUrl: s.person.photoKey && opts.photosEnabled ? `/api/v1/students/${s.id}/photo` : null,
     hasPhoto: !!s.person.photoKey,
   };
 }

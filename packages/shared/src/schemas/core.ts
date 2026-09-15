@@ -83,6 +83,13 @@ export const tenantSettingsSchema = z.object({
   enabledChannels: z.array(z.enum(['IN_APP', 'EMAIL', 'WHATSAPP', 'SMS', 'PUSH'])).default(['IN_APP', 'EMAIL']),
   annualUpdateMonth: z.number().int().min(1).max(12).default(8),
   requirePrescriptionForOtc: z.boolean().default(false),
+  /** Institutional e-mail domain for staff accounts (e.g. colegioaleman.edu.co). */
+  institutionalEmailDomain: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, 'Dominio inválido')
+    .optional(),
 });
 export type TenantSettings = z.infer<typeof tenantSettingsSchema>;
 

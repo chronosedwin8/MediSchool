@@ -22,7 +22,7 @@ Otros endpoints disponibles (áreas, periodos, calificaciones, asistencia `/1/at
 | sección (`K8B`) | `core.groups` |
 | `student.id` | `integration.external_ids.external_id` (entidad `student`) |
 | `code` | `people.students.code` (foto S3 `{code}.jpg`) |
-| `document`, `idtype` | documento; `idtype` 1→TI, 2→CC, 3→CE, 4→RC, 6→PA, 7→PPT (**inferido de la distribución de edades; confirmar con Phidias**) |
+| `document`, `idtype` | documento; `idtype` **1→TI** (tarjeta de identidad), **2→CC** (cédula de ciudadanía), **4→RC** (registro civil) — confirmados por el colegio; 3→CE, 6→PA, 7→PPT inferidos (pendiente de confirmar) |
 | `gender` | 1→M, 0→F (verificado con nombres) |
 | `birthday` (unix, medianoche Bogotá) | `birth_date` en zona America/Bogota |
 | `enrollment.status` | `retirado` → estudiante INACTIVO (`withdrawn`) |

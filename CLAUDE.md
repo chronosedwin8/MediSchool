@@ -26,11 +26,16 @@
 ## Comandos
 - `npm install` — instala todo (npm workspaces, ver ADR-0001).
 - `npm run db:setup` — crea BD/rol, aplica migraciones y RLS, carga seed.
-- `npm run dev` — API (:4000) + Web (:3000).
+- `npm run dev` — API (:4000) + Web (:3100; el 3000 lo usa otra aplicación del equipo).
+- `node scripts/capture-screenshots.mjs` — regenera las capturas de la ayuda (solo colegio demo, sin fotos).
+- `docker compose -f infra/docker-compose.yml --env-file .env up -d --build` — stack completo (puertos `SGEE_DB_PORT`/`SGEE_API_PORT`/`SGEE_WEB_PORT`).
 - `npm test` — unit + integración (usa BD `sgee_test`).
 - `npm run e2e` — Playwright con Chrome instalado.
 
 ## Notas del entorno
 - PostgreSQL 17 local (`postgres`/`1004`). La API se conecta con el rol NO superusuario `sgee_app` para que RLS aplique.
-- Sin Redis ni Docker daemon en el equipo de desarrollo: la cola de trabajos es PostgreSQL (`SKIP LOCKED`, ADR-0003).
-- Fotos de estudiantes: bucket S3 `enfermeriacaleman`, clave `{codigo}.jpg`.
+- Sin Redis: la cola de trabajos es PostgreSQL (`SKIP LOCKED`, ADR-0003). Docker Desktop disponible para probar `infra/`.
+- Fotos de estudiantes: bucket S3 `enfermeriacaleman`, clave `{codigo}.jpg`. Solo se muestran fotos vinculadas por la sincronización de Phidias (`person.photoKey`); nunca se busca por código.
+- Dominio institucional del colegio real: `colegioaleman.edu.co`. Credenciales del administrador solo en `.env` (`SEED_ADMIN_*`).
+- Sitio público: `/` y `/ayuda` (contenido en `apps/web/content/ayuda/*.md`, ADR-0010). Todo cambio de UI visible debe reflejarse en la guía correspondiente.
+- Phidias `idtype`: 1=TI, 2=CC, 4=RC confirmados por el colegio.

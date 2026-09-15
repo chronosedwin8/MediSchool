@@ -2,7 +2,7 @@
   "name": "MediSchool — Enfermería escolar",
   "short_name": "MediSchool",
   "description": "Gestión de enfermería escolar: atenciones, pases, medicación y comunicación con familias.",
-  "start_url": "/",
+  "start_url": "/panel",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",

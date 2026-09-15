@@ -1,0 +1,16 @@
+**/node_modules
+**/dist
+**/.next
+**/.next-*
+**/coverage
+**/storybook-static
+**/storage
+storage
+.env
+.env.*
+!.env.example
+*.log
+.git
+playwright-report
+test-results
+**/*.tsbuildinfo

@@ -19,7 +19,9 @@ const CAMPAIGN_KIND: Record<string, string> = { VACCINATION: 'Vacunación', DEWO
 export default function PublicHealthPage() {
   const { data: me } = useMe();
   const manage = can(me, 'public_health:manage');
-  const [tab, setTab] = useState('brotes');
+  // Directors and administrators only publish health circulars.
+  const [selected, setTab] = useState<string | null>(null);
+  const tab = selected ?? (me && !manage ? 'circulares' : 'brotes');
   return (
     <div>
       <PageHeader title="Salud pública escolar" description="Vigilancia epidemiológica, campañas, ausentismo, salidas pedagógicas y emergencias." />
@@ -27,12 +29,12 @@ export default function PublicHealthPage() {
         value={tab}
         onValueChange={setTab}
         tabs={[
-          { value: 'brotes', label: 'Brotes' },
-          { value: 'frecuentes', label: 'Consultas frecuentes' },
+          { value: 'brotes', label: 'Brotes', hidden: !manage },
+          { value: 'frecuentes', label: 'Consultas frecuentes', hidden: !manage },
           { value: 'campanas', label: 'Campañas', hidden: !manage },
           { value: 'excusas', label: 'Excusas médicas', hidden: !can(me, 'clinical:read') },
           { value: 'salidas', label: 'Salidas pedagógicas', hidden: !can(me, 'clinical:read') },
-          { value: 'emergencias', label: 'Emergencias' },
+          { value: 'emergencias', label: 'Emergencias', hidden: !manage },
           { value: 'circulares', label: 'Circulares', hidden: !can(me, 'comms:circulars') },
         ]}
       >
