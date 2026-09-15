@@ -6,17 +6,26 @@ import { config } from '../../config';
 import { PhotoService } from '../files/storage.service';
 import { JobsService } from '../jobs/jobs.service';
 import {
+  type CanonicalRelative,
   type CanonicalStudent,
+  PARENTAL,
   parseConsolidate,
   parseNursingPoll,
+  parseRelatives,
+  relativeHash,
   splitFullName,
   structureHash,
   studentHash,
 } from './phidias.adapter';
-import { PhidiasClient } from './phidias.client';
+import { PhidiasClient, PhidiasPermissionError } from './phidias.client';
 
 export const SOURCE = 'phidias';
-export type SyncKind = 'FULL' | 'INCREMENTAL' | 'ONE' | 'PHOTOS' | 'HISTORY';
+export type SyncKind = 'FULL' | 'INCREMENTAL' | 'ONE' | 'PHOTOS' | 'HISTORY' | 'RELATIVES';
+
+/** Links that already existed locally keep this hash prefix and are never deactivated by the sync. */
+const LOCAL_PREFIX = 'local:';
+const sameHash = (stored: string | undefined, hash: string) => !!stored && stored.replace(LOCAL_PREFIX, '') === hash;
+type Counters = { inserted: number; updated: number; skipped: number; deactivated: number; errors: number };
 
 export interface SyncSummary {
   runId: string;
@@ -48,6 +57,11 @@ export const DEFAULT_FIELD_OWNERSHIP: { entity: string; field: string; owner: 'P
   { entity: 'student', field: 'enrollmentStatus', owner: 'PHIDIAS' },
   { entity: 'student', field: 'transport', owner: 'LOCAL' },
   { entity: 'student', field: 'shift', owner: 'LOCAL' },
+  { entity: 'student_guardian', field: 'relationship', owner: 'PHIDIAS' },
+  { entity: 'student_guardian', field: 'isPrimary', owner: 'PHIDIAS' },
+  { entity: 'student_guardian', field: 'canPickUp', owner: 'LOCAL' },
+  { entity: 'student_guardian', field: 'judicialRestriction', owner: 'LOCAL' },
+  { entity: 'emergency_contact', field: 'phone', owner: 'PHIDIAS' },
   { entity: 'health_profile', field: '*', owner: 'LOCAL' },
   { entity: 'emergency_contact', field: '*', owner: 'LOCAL' },
   { entity: 'notification_preference', field: '*', owner: 'LOCAL' },
@@ -76,8 +90,10 @@ export class PhidiasSyncService implements OnModuleInit {
     this.jobs.register('phidias.sync.incremental', guard((t) => this.syncStudents(t, 'INCREMENTAL')));
     this.jobs.register('phidias.photos', guard((t) => this.syncPhotos(t)));
     this.jobs.register('phidias.history', guard((t) => this.importHistory(t)));
+    this.jobs.register('phidias.relatives', guard((t) => this.syncRelatives(t)));
     this.jobs.every('phidias.sync.incremental', 60);
     this.jobs.dailyAt('phidias.sync.full', '02:00');
+    this.jobs.dailyAt('phidias.relatives', '02:30');
     this.jobs.dailyAt('phidias.photos', '03:00');
     this.jobs.every('phidias.history', 60);
   }
@@ -358,6 +374,208 @@ export class PhidiasSyncService implements OnModuleInit {
     }
   }
 
+  // ── relatives: guardians and emergency contacts ───────────────────────────
+  /**
+   * Imports each student's relatives. Parents, legal guardians and relatives
+   * marked as responsible or authorized to pick up become guardians linked to
+   * the student; the remaining relatives marked as emergency contacts become
+   * emergency contacts. Other relatives are not stored (data minimization).
+   * Local decisions (who can pick up, judicial restrictions) are never overwritten.
+   */
+  async syncRelatives(tenantId: string, userId?: string | null, onlyStudentExternalId?: string): Promise<SyncSummary> {
+    const run = await this.startRun(tenantId, 'RELATIVES', userId);
+    const c = { inserted: 0, updated: 0, skipped: 0, deactivated: 0, errors: 0, details: {} as Record<string, unknown> };
+    try {
+      const cfg = config();
+      const links = await this.prisma.forTenant(tenantId, (tx) =>
+        tx.externalId.findMany({ where: { source: SOURCE, entity: 'student', missingSince: null, ...(onlyStudentExternalId ? { externalId: onlyStudentExternalId } : {}) }, select: { externalId: true, localId: true } }),
+      );
+      if (!links.length) {
+        c.details = { reason: 'Sin estudiantes vinculados: ejecute primero la sincronización de estudiantes.' };
+        return await this.finishRun(tenantId, run.id, 'RELATIVES', c);
+      }
+      const fetchRelatives = (studentExternalId: string) => this.client.get<unknown>(cfg.PHIDIAS_RELATIVES_ENDPOINT, { [cfg.PHIDIAS_RELATIVES_PARAM]: studentExternalId }, { cacheMs: 0 });
+      // Probe the permission before downloading the people directory.
+      const firstRaw = await fetchRelatives(links[0].externalId);
+      const directory = new Map((await this.client.listPeople()).map((p) => [String(p.id), p]));
+      const ownership = await this.ownership(tenantId);
+      const seen = new Set<string>();
+      let withRelatives = 0;
+      let responseKeys: string[] = [];
+
+      for (let i = 0; i < links.length; i += 25) {
+        const batch: { link: { externalId: string; localId: string }; relatives: CanonicalRelative[] }[] = [];
+        for (const link of links.slice(i, i + 25)) {
+          const raw = i === 0 && link === links[0] ? firstRaw : await fetchRelatives(link.externalId);
+          const first = Array.isArray(raw) ? raw[0] : raw;
+          if (!responseKeys.length && first && typeof first === 'object') responseKeys = Object.keys(first).sort();
+          const relatives = parseRelatives(raw, link.externalId, directory);
+          if (relatives.length) withRelatives++;
+          batch.push({ link, relatives });
+        }
+        await this.prisma.forTenant(tenantId, (tx) => this.applyRelatives(tx, tenantId, run.id, batch, ownership, seen, c), { timeout: 180_000 });
+      }
+
+      // Deactivate synced links that disappeared from Phidias (never on an empty answer for everyone).
+      const suspicious = withRelatives === 0 && links.length > 20 && !this.client.mock;
+      if (!onlyStudentExternalId && !suspicious) {
+        await this.prisma.forTenant(tenantId, async (tx) => {
+          const synced = await tx.externalId.findMany({ where: { source: SOURCE, entity: { in: ['student_guardian', 'emergency_contact'] }, missingSince: null } });
+          for (const s of synced) {
+            if (seen.has(`${s.entity}:${s.externalId}`)) continue;
+            if (!s.contentHash.startsWith(LOCAL_PREFIX)) {
+              if (s.entity === 'student_guardian') await tx.studentGuardian.update({ where: { id: s.localId }, data: { active: false } });
+              else await tx.emergencyContact.update({ where: { id: s.localId }, data: { active: false } });
+              c.deactivated++;
+            }
+            await tx.externalId.update({ where: { id: s.id }, data: { missingSince: new Date() } });
+          }
+        }, { timeout: 120_000 });
+      }
+      c.details = { students: links.length, studentsWithRelatives: withRelatives, directory: directory.size, responseKeys, ...(suspicious ? { deactivationSkipped: 'Phidias no devolvió parientes para ningún estudiante' } : {}) };
+      return await this.finishRun(tenantId, run.id, 'RELATIVES', c);
+    } catch (e) {
+      c.errors++;
+      if (e instanceof PhidiasPermissionError) {
+        c.details = { ...c.details, reason: 'PERMISSION_DENIED', module: e.module, action: `Solicite a Phidias habilitar para el token de integración los permisos "${e.module}" y "people/details".` };
+        return this.finishRun(tenantId, run.id, 'RELATIVES', c, new Error(`Phidias no autoriza la consulta de acudientes (${e.module}).`));
+      }
+      await this.finishRun(tenantId, run.id, 'RELATIVES', c, e as Error);
+      throw e;
+    }
+  }
+
+  private async applyRelatives(tx: Tx, tenantId: string, runId: string, batch: { link: { externalId: string; localId: string }; relatives: CanonicalRelative[] }[], ownership: Map<string, string>, seen: Set<string>, c: Counters) {
+    const conflict = (externalId: string, kind: string, details: object) => tx.syncConflict.create({ data: { tenantId, syncRunId: runId, entity: 'relative', externalId, kind, details: details as object } });
+    for (const { link, relatives } of batch) {
+      for (const r of relatives) {
+        const key = `${link.externalId}:${r.relativeExternalId}`;
+        const hash = relativeHash(r);
+        const phone = r.person?.mobile ?? r.person?.phone ?? null;
+        const asGuardian = r.isResponsible || r.canPickUp === true || PARENTAL.includes(r.relationship);
+        const asContact = !asGuardian && r.isEmergencyContact && !!phone;
+        if (!asGuardian && !asContact) {
+          c.skipped++;
+          continue;
+        }
+        if (!r.person) {
+          await conflict(key, 'RELATIVE_WITHOUT_PERSON', { relationship: r.relationshipLabel });
+          c.errors++;
+          continue;
+        }
+        const entity = asGuardian ? 'student_guardian' : 'emergency_contact';
+        seen.add(`${entity}:${key}`);
+        const existing = await tx.externalId.findUnique({ where: { tenantId_source_entity_externalId: { tenantId, source: SOURCE, entity, externalId: key } } });
+        if (existing && sameHash(existing.contentHash, hash) && !existing.missingSince) {
+          c.skipped++;
+          continue;
+        }
+        try {
+          if (asGuardian) await this.applyGuardian(tx, tenantId, runId, link.localId, r, key, hash, existing, ownership, c);
+          else await this.applyEmergencyContact(tx, tenantId, link.localId, r, phone!, key, hash, existing, ownership, c);
+        } catch (e) {
+          c.errors++;
+          await conflict(key, 'APPLY_ERROR', { message: (e as Error).message.slice(0, 300) });
+        }
+      }
+    }
+  }
+
+  private async guardianPerson(tx: Tx, tenantId: string, runId: string, r: CanonicalRelative, ownership: Map<string, string>) {
+    const p = r.person!;
+    const data = { documentType: p.documentType, documentNumber: p.documentNumber, firstName: p.firstName || 'Sin nombre', lastName: p.lastName, sex: p.sex, email: p.email, phone: p.phone, mobile: p.mobile, address: p.address };
+    const dataHash = structureHash(data);
+    const link = await tx.externalId.findUnique({ where: { tenantId_source_entity_externalId: { tenantId, source: SOURCE, entity: 'guardian_person', externalId: r.relativeExternalId } } });
+    let personId: string;
+    if (link) {
+      personId = link.localId;
+      if (link.contentHash !== dataHash) {
+        const current = (await tx.person.findUniqueOrThrow({ where: { id: personId } })) as unknown as Record<string, unknown>;
+        const update: Record<string, unknown> = {};
+        for (const [f, v] of Object.entries(data)) {
+          const owner = ownership.get(`person.${f}`) ?? 'PHIDIAS';
+          if (owner === 'PHIDIAS' || (owner === 'MERGE' && (current[f] === null || current[f] === ''))) update[f] = v;
+        }
+        await tx.person.update({ where: { id: personId }, data: update });
+        await tx.externalId.update({ where: { id: link.id }, data: { contentHash: dataHash, syncedAt: new Date(), missingSince: null } });
+      }
+    } else {
+      const local = p.documentNumber ? await tx.person.findFirst({ where: { kind: 'GUARDIAN', documentNumber: p.documentNumber } }) : null;
+      const localLinked = local ? await tx.externalId.findFirst({ where: { source: SOURCE, entity: 'guardian_person', localId: local.id } }) : null;
+      if (local && !localLinked) {
+        // A guardian registered locally (e.g. by invitation): link it and only fill empty contact data.
+        personId = local.id;
+        await tx.person.update({ where: { id: local.id }, data: { documentType: data.documentType, email: local.email ?? data.email, mobile: local.mobile ?? data.mobile, phone: local.phone ?? data.phone, address: local.address ?? data.address } });
+        await tx.syncConflict.create({ data: { tenantId, syncRunId: runId, entity: 'guardian_person', externalId: r.relativeExternalId, kind: 'LINKED_BY_DOCUMENT', details: { localPersonId: local.id } } });
+      } else {
+        personId = (await tx.person.create({ data: { tenantId, kind: 'GUARDIAN', source: 'PHIDIAS', ...data } })).id;
+      }
+      await tx.externalId.create({ data: { tenantId, source: SOURCE, entity: 'guardian_person', externalId: r.relativeExternalId, localId: personId, contentHash: dataHash } });
+    }
+    return (await tx.guardian.findUnique({ where: { personId } })) ?? (await tx.guardian.create({ data: { tenantId, personId } }));
+  }
+
+  private async applyGuardian(tx: Tx, tenantId: string, runId: string, studentId: string, r: CanonicalRelative, key: string, hash: string, existing: { id: string; contentHash: string } | null, ownership: Map<string, string>, c: Counters) {
+    const guardian = await this.guardianPerson(tx, tenantId, runId, r, ownership);
+    const owner = (f: string) => ownership.get(`student_guardian.${f}`) ?? 'PHIDIAS';
+    const parental = PARENTAL.includes(r.relationship);
+    const current = await tx.studentGuardian.findUnique({ where: { studentId_guardianId: { studentId, guardianId: guardian.id } } });
+    let linkId: string;
+    let created = false;
+    if (!current) {
+      linkId = (
+        await tx.studentGuardian.create({
+          data: { tenantId, studentId, guardianId: guardian.id, relationship: r.relationship, isPrimary: r.isResponsible, canPickUp: r.canPickUp ?? parental, legalCustody: parental || r.isResponsible },
+        })
+      ).id;
+      created = true;
+    } else {
+      linkId = current.id;
+      await tx.studentGuardian.update({
+        where: { id: current.id },
+        data: {
+          ...(owner('relationship') !== 'LOCAL' && { relationship: r.relationship }),
+          ...(owner('isPrimary') !== 'LOCAL' && { isPrimary: r.isResponsible }),
+          ...(owner('canPickUp') === 'PHIDIAS' && r.canPickUp !== null && { canPickUp: r.canPickUp }),
+          active: true,
+        },
+      });
+    }
+    if (existing) {
+      await tx.externalId.update({ where: { id: existing.id }, data: { contentHash: existing.contentHash.startsWith(LOCAL_PREFIX) ? `${LOCAL_PREFIX}${hash}` : hash, syncedAt: new Date(), missingSince: null } });
+      c.updated++;
+    } else {
+      await tx.externalId.create({ data: { tenantId, source: SOURCE, entity: 'student_guardian', externalId: key, localId: linkId, contentHash: created ? hash : `${LOCAL_PREFIX}${hash}` } });
+      if (created) c.inserted++;
+      else c.updated++;
+    }
+  }
+
+  private async applyEmergencyContact(tx: Tx, tenantId: string, studentId: string, r: CanonicalRelative, phone: string, key: string, hash: string, existing: { id: string; localId: string; contentHash: string } | null, ownership: Map<string, string>, c: Counters) {
+    const p = r.person!;
+    const name = `${p.firstName} ${p.lastName}`.trim() || 'Contacto';
+    const altPhone = p.mobile && p.phone && p.mobile !== p.phone ? p.phone : null;
+    const syncPhone = (ownership.get('emergency_contact.phone') ?? 'PHIDIAS') !== 'LOCAL';
+    if (existing) {
+      await tx.emergencyContact.update({ where: { id: existing.localId }, data: { ...(syncPhone && { name, relationship: r.relationshipLabel, phone, altPhone }), active: true } });
+      await tx.externalId.update({ where: { id: existing.id }, data: { contentHash: existing.contentHash.startsWith(LOCAL_PREFIX) ? `${LOCAL_PREFIX}${hash}` : hash, syncedAt: new Date(), missingSince: null } });
+      c.updated++;
+      return;
+    }
+    const digits = phone.replace(/\D/g, '');
+    const local = (await tx.emergencyContact.findMany({ where: { studentId, active: true } })).find((x) => x.phone.replace(/\D/g, '') === digits);
+    if (local) {
+      await tx.externalId.create({ data: { tenantId, source: SOURCE, entity: 'emergency_contact', externalId: key, localId: local.id, contentHash: `${LOCAL_PREFIX}${hash}` } });
+      c.updated++;
+      return;
+    }
+    const contact = await tx.emergencyContact.create({
+      data: { tenantId, studentId, name, relationship: r.relationshipLabel, phone, altPhone, canPickUp: r.canPickUp ?? false, documentNumber: p.documentNumber, notes: 'Sincronizado desde Phidias', verified: true, verifiedAt: new Date() },
+    });
+    await tx.externalId.create({ data: { tenantId, source: SOURCE, entity: 'emergency_contact', externalId: key, localId: contact.id, contentHash: hash } });
+    c.inserted++;
+  }
+
   // ── historical nursing records from Phidias polls ─────────────────────────
   async importHistory(tenantId: string, userId?: string | null): Promise<SyncSummary> {
     const run = await this.startRun(tenantId, 'HISTORY', userId);
@@ -466,7 +684,7 @@ export class PhidiasSyncService implements OnModuleInit {
 
   async status(tenantId: string) {
     return this.prisma.forTenant(tenantId, async (tx) => {
-      const [setting, runs, conflicts, students, active, withPhoto, historical] = await Promise.all([
+      const [setting, runs, conflicts, students, active, withPhoto, historical, guardians, contacts, lastRelatives] = await Promise.all([
         tx.integrationSetting.findUnique({ where: { tenantId_provider: { tenantId, provider: 'PHIDIAS' } } }),
         tx.syncRun.findMany({ orderBy: { startedAt: 'desc' }, take: 20 }),
         tx.syncConflict.count({ where: { status: 'OPEN' } }),
@@ -474,8 +692,25 @@ export class PhidiasSyncService implements OnModuleInit {
         tx.student.count({ where: { status: 'ACTIVE' } }),
         tx.person.count({ where: { kind: 'STUDENT', photoKey: { not: null } } }),
         tx.encounter.count({ where: { source: 'PHIDIAS_POLL' } }),
+        tx.externalId.count({ where: { source: SOURCE, entity: 'student_guardian', missingSince: null } }),
+        tx.externalId.count({ where: { source: SOURCE, entity: 'emergency_contact', missingSince: null } }),
+        tx.syncRun.findFirst({ where: { kind: 'RELATIVES', status: { not: 'RUNNING' } }, orderBy: { startedAt: 'desc' } }),
       ]);
-      return { enabled: !!setting?.enabled, mock: this.client.mock, photosEnabled: this.photos.enabled, runs, openConflicts: conflicts, linkedStudents: students, activeStudents: active, studentsWithPhoto: withPhoto, historicalEncounters: historical };
+      const rd = (lastRelatives?.details ?? {}) as { reason?: string; module?: string };
+      return {
+        enabled: !!setting?.enabled,
+        mock: this.client.mock,
+        photosEnabled: this.photos.enabled,
+        runs,
+        openConflicts: conflicts,
+        linkedStudents: students,
+        activeStudents: active,
+        studentsWithPhoto: withPhoto,
+        historicalEncounters: historical,
+        guardiansLinked: guardians,
+        emergencyContactsLinked: contacts,
+        relativesPermission: lastRelatives ? { denied: rd.reason === 'PERMISSION_DENIED', module: rd.module ?? null, checkedAt: lastRelatives.startedAt } : null,
+      };
     });
   }
 }

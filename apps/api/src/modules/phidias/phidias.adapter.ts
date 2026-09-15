@@ -58,8 +58,8 @@ const SECTION_MAP: Record<string, { code: string; name: string; sortOrder: numbe
 };
 
 /**
- * Phidias `idtype` codes. Inferred from the age distribution of the real
- * data (4 → children under 7, 1 → 7–17). Verify against the Phidias admin.
+ * Phidias `idtype` codes. 1 → TI, 2 → CC and 4 → RC confirmed by the school;
+ * 3 → CE, 6 → PA and 7 → PPT inferred from the data (pending confirmation).
  */
 export const ID_TYPES: Record<number, string> = { 1: 'TI', 2: 'CC', 3: 'CE', 4: 'RC', 6: 'PA', 7: 'PPT' };
 const INACTIVE_ENROLLMENT = ['retirado', 'cancelado', 'no continua', 'graduado'];
@@ -222,6 +222,155 @@ export function parseNursingPoll(records: unknown, pollId: number, subjectType: 
     });
   }
   return out;
+}
+
+// ── relatives: guardians (acudientes/responsables) and emergency contacts ────
+
+/** Person record from `/1/people`. Credentials (`username`, `password`) are never read. */
+export interface RawPerson {
+  id: number | string;
+  type?: number | null;
+  document?: number | string | null;
+  idtype?: number | null;
+  gender?: number | null;
+  firstname?: string | null;
+  lastname?: string | null;
+  lastname1?: string | null;
+  lastname2?: string | null;
+  email?: string | null;
+  phone?: number | string | null;
+  mobile?: number | string | null;
+  address?: string | null;
+}
+
+export interface CanonicalPerson {
+  externalId: string;
+  documentType: string;
+  documentNumber: string | null;
+  firstName: string;
+  lastName: string;
+  sex: 'M' | 'F' | null;
+  email: string | null;
+  phone: string | null;
+  mobile: string | null;
+  address: string | null;
+}
+
+export type RelationshipCode = 'MOTHER' | 'FATHER' | 'GRANDPARENT' | 'SIBLING' | 'UNCLE_AUNT' | 'LEGAL_GUARDIAN' | 'OTHER';
+
+export interface CanonicalRelative {
+  studentExternalId: string;
+  relativeExternalId: string;
+  relationship: RelationshipCode;
+  relationshipLabel: string;
+  isResponsible: boolean;
+  isEmergencyContact: boolean;
+  /** null when Phidias does not state it (the local default applies). */
+  canPickUp: boolean | null;
+  livesWith: boolean | null;
+  person: CanonicalPerson | null;
+}
+
+const RELATIONSHIP_PATTERNS: [RegExp, RelationshipCode][] = [
+  [/\bmadre\b|\bmam[aá]\b|mother/i, 'MOTHER'],
+  [/\bpadre\b|\bpap[aá]\b|father/i, 'FATHER'],
+  [/abuel|grand/i, 'GRANDPARENT'],
+  [/herman|sibling|brother|sister/i, 'SIBLING'],
+  [/\bt[ií][oa]s?\b|uncle|aunt/i, 'UNCLE_AUNT'],
+  [/tutor|acudiente|guardian|responsable|apoderad/i, 'LEGAL_GUARDIAN'],
+];
+const RELATIONSHIP_DEFAULT_LABEL: Record<RelationshipCode, string> = { MOTHER: 'Madre', FATHER: 'Padre', GRANDPARENT: 'Abuelo(a)', SIBLING: 'Hermano(a)', UNCLE_AUNT: 'Tío(a)', LEGAL_GUARDIAN: 'Acudiente', OTHER: 'Familiar' };
+export const PARENTAL: RelationshipCode[] = ['MOTHER', 'FATHER', 'LEGAL_GUARDIAN'];
+
+export function relationshipCode(text: string | null | undefined): RelationshipCode {
+  const t = (text ?? '').trim();
+  return RELATIONSHIP_PATTERNS.find(([re]) => re.test(t))?.[1] ?? 'OTHER';
+}
+
+export function toCanonicalPerson(p: RawPerson): CanonicalPerson {
+  const lastName = clean(p.lastname) ?? [clean(p.lastname1), clean(p.lastname2)].filter(Boolean).join(' ');
+  return {
+    externalId: String(p.id),
+    documentType: p.idtype ? (ID_TYPES[p.idtype] ?? 'OTRO') : 'OTRO',
+    documentNumber: clean(p.document),
+    firstName: titleCase(clean(p.firstname) ?? ''),
+    lastName: titleCase(lastName ?? ''),
+    sex: p.gender === 1 ? 'M' : p.gender === 0 ? 'F' : null,
+    email: clean(p.email)?.toLowerCase() ?? null,
+    phone: clean(p.phone),
+    mobile: clean(p.mobile),
+    address: clean(p.address),
+  };
+}
+
+const truthy = (v: unknown) => v === true || v === 1 || (typeof v === 'string' && /^(1|true|s[ií]|yes|s)$/i.test(v.trim()));
+function flag(r: Record<string, unknown>, keys: string[]): boolean | null {
+  for (const k of keys) if (k in r && r[k] !== null && r[k] !== undefined && r[k] !== '') return truthy(r[k]);
+  return null;
+}
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * Parses the relatives of a student. The payload shape of Phidias' relatives
+ * endpoint is not documented, so the parser accepts the usual variants: a
+ * nested relative person object or only its id (resolved against the
+ * `/1/people` directory), and several names for the relationship and flags.
+ */
+export function parseRelatives(raw: unknown, studentExternalId: string, directory: Map<string, RawPerson>): CanonicalRelative[] {
+  const rows: unknown[] = Array.isArray(raw) ? raw : isObj(raw) ? ((['relatives', 'response', 'data', 'items'].map((k) => raw[k]).find(Array.isArray) as unknown[]) ?? []) : [];
+  const byId = new Map<string, CanonicalRelative>();
+  for (const row of rows) {
+    if (!isObj(row)) continue;
+    const candidates: unknown[] = [row.relative, row.relative_person, row.relativePerson, row.relative_id, row.relativeId, row.person, row.person_id, row.personId];
+    let nested: Record<string, unknown> | null = null;
+    let relId: string | null = null;
+    for (const c of candidates) {
+      const id = isObj(c) ? clean(c.id) : clean(c);
+      if (!id || id === studentExternalId) continue;
+      relId = id;
+      nested = isObj(c) ? c : null;
+      break;
+    }
+    if (!relId && row.firstname && clean(row.id) !== studentExternalId) {
+      relId = clean(row.id);
+      nested = row;
+    }
+    if (!relId) continue;
+    const personRaw = (nested && (nested.firstname || nested.lastname) ? nested : directory.get(relId)) as RawPerson | undefined;
+    const relText = clean(row.relationship ?? row.kinship ?? row.relation ?? row.relationship_name ?? row.relation_name ?? row.type_name ?? row.parentesco ?? (typeof row.type === 'string' ? row.type : null) ?? (row.firstname ? null : row.name));
+    const relationship = relationshipCode(relText);
+    const parsed: CanonicalRelative = {
+      studentExternalId,
+      relativeExternalId: relId,
+      relationship,
+      relationshipLabel: relText ? titleCase(relText) : RELATIONSHIP_DEFAULT_LABEL[relationship],
+      isResponsible: flag(row, ['responsible', 'is_responsible', 'responsable', 'acudiente', 'main', 'primary', 'is_primary', 'financial_responsible', 'academic_responsible']) ?? relationship === 'LEGAL_GUARDIAN',
+      isEmergencyContact: flag(row, ['emergency', 'emergency_contact', 'is_emergency_contact', 'contact_emergency', 'emergencia']) ?? false,
+      canPickUp: flag(row, ['pickup', 'pick_up', 'can_pickup', 'can_pick_up', 'authorized', 'authorized_pickup', 'recoge']),
+      livesWith: flag(row, ['lives_with', 'livesWith', 'cohabits', 'vive_con']),
+      person: personRaw ? toCanonicalPerson({ ...personRaw, id: relId }) : null,
+    };
+    const prev = byId.get(relId);
+    byId.set(
+      relId,
+      prev
+        ? { ...prev, isResponsible: prev.isResponsible || parsed.isResponsible, isEmergencyContact: prev.isEmergencyContact || parsed.isEmergencyContact, canPickUp: prev.canPickUp ?? parsed.canPickUp, person: prev.person ?? parsed.person }
+        : parsed,
+    );
+  }
+  return [...byId.values()];
+}
+
+export function relativeHash(r: CanonicalRelative): string {
+  return sha256(canonicalJson(r));
+}
+
+/** Returns the denied module when Phidias answers `[{ code: "denied", arguments: { module } }]`. */
+export function parsePhidiasDenied(body: unknown): string | null {
+  const first = Array.isArray(body) ? body[0] : body;
+  if (!isObj(first) || first.code !== 'denied') return null;
+  const args = isObj(first.arguments) ? first.arguments : {};
+  return clean(args.module) ?? clean(first.message) ?? 'desconocido';
 }
 
 /** "SAMANTHA LUZARDO MENDOZA" → first/last names (Colombian convention). */

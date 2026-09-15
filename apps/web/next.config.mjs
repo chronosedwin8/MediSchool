@@ -25,6 +25,8 @@ const csp = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Keep the dev-tools badge away from the sidebar user card.
+  devIndicators: { position: 'bottom-right' },
   outputFileTracingRoot: root,
   transpilePackages: ['@sgee/ui'],
   eslint: { ignoreDuringBuilds: true },

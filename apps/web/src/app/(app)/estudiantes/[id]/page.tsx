@@ -73,7 +73,14 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
     mutationFn: (relationship: string) => api<{ code: string; link: string }>('/invitations', { body: { studentId: id, relationship, expiresInDays: 14 } }),
     onSuccess: setInvite,
   });
-  const syncOne = useMutation({ mutationFn: () => api(`/integrations/phidias/sync-one/${id}`, { method: 'POST' }), onSuccess: () => { toast.success('Sincronizado con Phidias'); qc.invalidateQueries({ queryKey: ['student', id] }); } });
+  const syncOne = useMutation({
+    mutationFn: () => api<{ relatives?: { status: string; inserted: number; updated: number; details?: { error?: string; action?: string } } }>(`/integrations/phidias/sync-one/${id}`, { method: 'POST' }),
+    onSuccess: (r) => {
+      if (r.relatives?.status === 'FAILED') toast.warning('Datos del estudiante sincronizados. Acudientes y contactos no disponibles.', { description: r.relatives.details?.action ?? r.relatives.details?.error });
+      else toast.success('Sincronizado con Phidias (incluye acudientes y contactos)');
+      qc.invalidateQueries({ queryKey: ['student', id] });
+    },
+  });
   const addMh = useMutation({
     mutationFn: () => api('/mental-health-notes', { body: { studentId: id, ...mhNote } }),
     onSuccess: () => {

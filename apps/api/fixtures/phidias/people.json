@@ -1,0 +1,6 @@
+[
+  { "id": 90001, "type": 1, "document": 1043000001, "idtype": 1, "gender": 1, "firstname": "ESTUDIANTE", "lastname": "UNO", "username": "est1", "password": "fixture-secret-never-stored" },
+  { "id": 80001, "type": 3, "document": 52111222, "idtype": 2, "gender": 0, "firstname": "MARTA", "lastname": "GÓMEZ RUIZ", "email": "Marta.Gomez@example.com", "phone": 0, "mobile": 3001112233, "address": "Cra 1 # 2-3", "username": "mgomez", "password": "fixture-secret-never-stored" },
+  { "id": 80002, "type": 3, "document": 72333444, "idtype": 2, "gender": 1, "firstname": "JORGE", "lastname": "PÉREZ LUNA", "email": "jorge.perez@example.com", "phone": 3605551234, "mobile": 3014445566, "username": "jperez", "password": "fixture-secret-never-stored" },
+  { "id": 80004, "type": 3, "document": 1043999888, "idtype": 1, "gender": 1, "firstname": "LUIS", "lastname": "PÉREZ GÓMEZ", "mobile": 3027778899 }
+]

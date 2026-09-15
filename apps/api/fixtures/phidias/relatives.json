@@ -1,0 +1,13 @@
+{
+  "90001": [
+    { "relative": 80001, "relationship": "Madre", "responsible": 1, "emergency": 1, "pickup": 1 },
+    { "relative_id": 80002, "kinship": "PADRE", "responsible": 0, "emergency": 1 }
+  ],
+  "90002": [
+    { "relative": { "id": 80003, "firstname": "ROSA", "lastname": "PÉREZ", "mobile": 3009998877 }, "relationship": "Abuela", "emergency": true, "pickup": 0 },
+    { "relative": 80004, "relationship": "Hermano" }
+  ],
+  "90003": [
+    { "relative": 80001, "relationship": "Tía", "emergency": "1" }
+  ]
+}

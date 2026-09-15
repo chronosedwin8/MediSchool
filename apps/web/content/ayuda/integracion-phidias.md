@@ -19,7 +19,22 @@ updated: 2026-09-15
 | Tipo de documento | Sí | **1 → TI** (tarjeta de identidad), **2 → CC** (cédula de ciudadanía), **4 → RC** (registro civil); también CE, pasaporte y PPT. |
 | Fotos | Sí (S3) | Se vinculan por el código del estudiante. |
 | Historial de atenciones | Sí (encuestas) | Atenciones registradas en las encuestas de enfermería de estudiantes y colaboradores; se importan como registros **históricos** cerrados. |
-| Ficha de salud, acudientes, contactos, medicación | **No** | Se gestionan solo en MediSchool y nunca se sobrescriben. |
+| Acudientes y contactos de emergencia | Sí (parientes) | Padres, tutores y responsables se vinculan como **acudientes**; los familiares marcados como contacto de emergencia, como **contactos**. Requiere un permiso de Phidias (ver abajo). |
+| Ficha de salud, medicación, restricciones judiciales y quién puede recoger | **No** | Se gestionan solo en MediSchool y nunca se sobrescriben. |
+
+## Acudientes y contactos de emergencia
+
+Pulse **Acudientes y contactos** (o espere la sincronización nocturna de las 02:30). Por cada estudiante, MediSchool consulta sus parientes en Phidias y:
+
+- vincula como **acudientes** a la madre, el padre, el tutor legal y a cualquier familiar marcado como responsable o autorizado para recoger;
+- registra como **contactos de emergencia** a los demás familiares marcados como contacto de emergencia que tengan teléfono;
+- no guarda a los demás familiares.
+
+Si un acudiente ya se había registrado con código de invitación, se vincula con su mismo documento y conserva sus datos. Las decisiones tomadas en el colegio, como **quién puede recoger** o una **restricción judicial**, nunca se sobrescriben.
+
+> **Importante:** Phidias exige que el token de integración tenga los permisos `Person_Relative_Controller::getRelatives` y `people/details`. Si no los tiene, el panel muestra el aviso *Phidias no autoriza la consulta de acudientes y contactos* y la ejecución queda como fallida sin afectar los datos. Solicite a Phidias habilitarlos para el usuario de la API y vuelva a ejecutar la sincronización.
+
+El indicador **Acudientes vinculados** muestra cuántos vínculos y contactos llegaron desde Phidias.
 
 ## Panel de Phidias
 

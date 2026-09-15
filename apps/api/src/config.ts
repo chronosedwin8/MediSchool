@@ -20,6 +20,9 @@ const schema = z.object({
   PHIDIAS_MOCK: bool(false),
   POLL_ID_ENFERMERIA: z.coerce.number().default(114),
   POLL_ID_ENFERMERIA_COLAB: z.coerce.number().default(113),
+  /** Relatives (guardians/emergency contacts) endpoint and the query parameter carrying the student's Phidias id. */
+  PHIDIAS_RELATIVES_ENDPOINT: z.string().default('/1/people/relatives'),
+  PHIDIAS_RELATIVES_PARAM: z.string().default('personId'),
   AWS_ACCESS_KEY_ID: optional,
   AWS_SECRET_ACCESS_KEY: optional,
   AWS_REGION: z.string().default('us-east-2'),

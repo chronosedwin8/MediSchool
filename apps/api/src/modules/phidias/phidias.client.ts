@@ -2,10 +2,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config';
+import { parsePhidiasDenied, type RawPerson } from './phidias.adapter';
 
 export class PhidiasError extends Error {
   constructor(message: string, readonly status?: number) {
     super(message);
+  }
+}
+
+/** The integration token lacks a Phidias permission (module) — not a transient failure. */
+export class PhidiasPermissionError extends PhidiasError {
+  constructor(readonly module: string) {
+    super(`Phidias denegó el acceso a ${module}`, 401);
   }
 }
 
@@ -44,6 +52,22 @@ export class PhidiasClient {
     this.cache.clear();
   }
 
+  /**
+   * People directory (`/1/people`, paginated). Phidias includes `username` and
+   * `password` in this payload: they are dropped immediately and never cached.
+   */
+  async listPeople(): Promise<RawPerson[]> {
+    const out: RawPerson[] = [];
+    for (let page = 1; page <= 20; page++) {
+      const rows = await this.get<(RawPerson & { username?: unknown; password?: unknown })[]>('/1/people', { limit: 5000, page }, { cacheMs: 0 });
+      if (!Array.isArray(rows) || rows.length === 0) break;
+      for (const { username: _u, password: _p, ...safe } of rows) out.push(safe);
+      if (rows.length < 5000) break;
+    }
+    this.cache.forEach((_v, k) => k.startsWith('/1/people?') && this.cache.delete(k));
+    return out;
+  }
+
   private async fetchWithRetry<T>(endpoint: string, qs: URLSearchParams, timeoutMs: number): Promise<T> {
     if (Date.now() < this.openUntil) throw new PhidiasError('Phidias no disponible (circuito abierto). Reintente en un minuto.', 503);
     const c = config();
@@ -64,9 +88,15 @@ export class PhidiasClient {
           this.failures = 0;
           return (await res.json()) as T;
         }
+        if (res.status === 401 || res.status === 403) {
+          // Error bodies carry no personal data: { code: "denied", arguments: { module } }.
+          const denied = parsePhidiasDenied(await res.json().catch(() => null));
+          if (denied) throw new PhidiasPermissionError(denied);
+        }
         lastErr = new PhidiasError(`Phidias respondió ${res.status}`, res.status);
         if (res.status !== 429 && res.status < 500) break;
       } catch (e) {
+        if (e instanceof PhidiasPermissionError) throw e;
         lastErr = new PhidiasError(`Error de red con Phidias: ${(e as Error).name}`);
         this.logger.warn(`GET ${endpoint} failed: ${(e as Error).name}`);
       }
@@ -85,9 +115,15 @@ export class PhidiasClient {
     let name: string;
     if (endpoint.includes('/course/consolidate')) name = 'consolidate.json';
     else if (endpoint.includes('/poll/consolidate')) name = `poll-${params.pollId}.json`;
-    else name = `${endpoint.replace(/^\/1\//, '').replace(/\//g, '_')}.json`;
+    else if (endpoint === config().PHIDIAS_RELATIVES_ENDPOINT) name = 'relatives.json';
+    else if (endpoint === '/1/people') {
+      if (Number(params.page ?? 1) > 1) return [] as unknown as T;
+      name = 'people.json';
+    } else name = `${endpoint.replace(/^\/1\//, '').replace(/\//g, '_')}.json`;
     try {
-      return JSON.parse(await fs.readFile(path.join(dir, name), 'utf8')) as T;
+      const data = JSON.parse(await fs.readFile(path.join(dir, name), 'utf8'));
+      if (name === 'relatives.json') return (data[String(params[config().PHIDIAS_RELATIVES_PARAM])] ?? []) as T;
+      return data as T;
     } catch {
       return [] as unknown as T;
     }

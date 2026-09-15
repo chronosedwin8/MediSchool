@@ -9,7 +9,7 @@ import { zp } from '../../common/zod.pipe';
 import { JobsService } from '../jobs/jobs.service';
 import { DEFAULT_FIELD_OWNERSHIP, PhidiasSyncService } from './phidias-sync.service';
 
-const syncSchema = z.object({ kind: z.enum(['FULL', 'INCREMENTAL', 'PHOTOS', 'HISTORY']), wait: z.boolean().default(false) });
+const syncSchema = z.object({ kind: z.enum(['FULL', 'INCREMENTAL', 'PHOTOS', 'HISTORY', 'RELATIVES']), wait: z.boolean().default(false) });
 const ownershipSchema = z.object({ rows: z.array(z.object({ entity: z.string(), field: z.string(), owner: z.enum(['PHIDIAS', 'LOCAL', 'MERGE']) })).min(1) });
 
 @ApiTags('integrations')
@@ -34,9 +34,10 @@ export class PhidiasController {
     if (body.wait) {
       if (body.kind === 'PHOTOS') return this.sync.syncPhotos(t, user.id);
       if (body.kind === 'HISTORY') return this.sync.importHistory(t, user.id);
+      if (body.kind === 'RELATIVES') return this.sync.syncRelatives(t, user.id);
       return this.sync.syncStudents(t, body.kind, user.id);
     }
-    const name = { FULL: 'phidias.sync.full', INCREMENTAL: 'phidias.sync.incremental', PHOTOS: 'phidias.photos', HISTORY: 'phidias.history' }[body.kind];
+    const name = { FULL: 'phidias.sync.full', INCREMENTAL: 'phidias.sync.incremental', PHOTOS: 'phidias.photos', HISTORY: 'phidias.history', RELATIVES: 'phidias.relatives' }[body.kind];
     const jobId = await this.jobs.enqueue(name, { triggeredBy: user.id }, { tenantId: t, dedupeKey: `${name}:${t}:manual:${Math.floor(Date.now() / 30_000)}` });
     return { queued: true, jobId };
   }
@@ -45,7 +46,9 @@ export class PhidiasController {
   async syncOne(@CurrentUser() user: AuthUser, @Param('studentId') studentId: string) {
     const link = await this.prisma.forUser(user, (tx) => tx.externalId.findFirst({ where: { source: 'phidias', entity: 'student', localId: studentId } }));
     if (!link) throw notFound('Vínculo con Phidias del estudiante');
-    return this.sync.syncStudents(user.tenantId, 'ONE', user.id, link.externalId);
+    const student = await this.sync.syncStudents(user.tenantId, 'ONE', user.id, link.externalId);
+    const relatives = await this.sync.syncRelatives(user.tenantId, user.id, link.externalId);
+    return { ...student, relatives };
   }
 
   @Get('runs')

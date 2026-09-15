@@ -81,10 +81,10 @@ function useFieldControl(id: string | undefined, describedBy: string | undefined
   return { id: id ?? ctx?.id, 'aria-describedby': describedBy ?? ctx?.describedBy };
 }
 
-export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(({ className, id, 'aria-describedby': d, ...p }, ref) => <input ref={ref} className={cn(control, 'h-11', className)} {...useFieldControl(id, d)} {...p} />);
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(({ className, id, 'aria-describedby': d, ...p }, ref) => <input ref={ref} className={cn(control, 'h-11', className)} suppressHydrationWarning {...useFieldControl(id, d)} {...p} />);
 Input.displayName = 'Input';
 
-export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(({ className, rows = 3, id, 'aria-describedby': d, ...p }, ref) => <textarea ref={ref} rows={rows} className={cn(control, 'py-2.5 leading-relaxed', className)} {...useFieldControl(id, d)} {...p} />);
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(({ className, rows = 3, id, 'aria-describedby': d, ...p }, ref) => <textarea ref={ref} rows={rows} className={cn(control, 'py-2.5 leading-relaxed', className)} suppressHydrationWarning {...useFieldControl(id, d)} {...p} />);
 Textarea.displayName = 'Textarea';
 
 export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(({ className, children, id, 'aria-describedby': d, ...p }, ref) => (
@@ -136,9 +136,9 @@ export function Toggle({ checked, onChange, label, disabled }: { checked: boolea
         aria-checked={checked}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={cn('relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50', checked ? 'bg-primary-600' : 'bg-border')}
+        className={cn('relative inline-flex h-7 w-12 shrink-0 items-center rounded-full p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-50', checked ? 'bg-primary-600' : 'bg-border')}
       >
-        <span className={cn('absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform', checked ? 'translate-x-5.5' : 'translate-x-0.5')} />
+        <span aria-hidden className={cn('block h-6 w-6 rounded-full bg-white shadow transition-transform', checked ? 'translate-x-5' : 'translate-x-0')} />
       </button>
     </label>
   );

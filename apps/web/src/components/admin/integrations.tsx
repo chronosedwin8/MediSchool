@@ -2,7 +2,7 @@
 
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Select, Skeleton, StatCard, Toggle } from '@sgee/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Camera, History, RefreshCw, Users } from 'lucide-react';
+import { Camera, History, RefreshCw, Users, UsersRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { fmtDateTime } from '@/lib/format';
@@ -15,11 +15,14 @@ interface Status {
   activeStudents: number;
   studentsWithPhoto: number;
   historicalEncounters: number;
+  guardiansLinked: number;
+  emergencyContactsLinked: number;
+  relativesPermission: { denied: boolean; module: string | null; checkedAt: string } | null;
   openConflicts: number;
   runs: { id: string; kind: string; status: string; startedAt: string; finishedAt: string | null; inserted: number; updated: number; skipped: number; deactivated: number; errors: number; details: Record<string, unknown> }[];
 }
 
-const KIND: Record<string, string> = { FULL: 'Completa', INCREMENTAL: 'Incremental', ONE: 'Un estudiante', PHOTOS: 'Fotos', HISTORY: 'Historial de encuestas' };
+const KIND: Record<string, string> = { FULL: 'Completa', INCREMENTAL: 'Incremental', ONE: 'Un estudiante', PHOTOS: 'Fotos', HISTORY: 'Historial de encuestas', RELATIVES: 'Acudientes y contactos' };
 
 export function IntegrationsPanel() {
   const qc = useQueryClient();
@@ -27,9 +30,10 @@ export function IntegrationsPanel() {
   const conflicts = useQuery({ queryKey: ['phidias-conflicts'], queryFn: () => api<{ id: string; entity: string; externalId: string; kind: string; details: Record<string, unknown>; createdAt: string }[]>('/integrations/phidias/conflicts') });
   const ownership = useQuery({ queryKey: ['phidias-ownership'], queryFn: () => api<{ entity: string; field: string; owner: string }[]>('/integrations/phidias/field-ownership') });
   const sync = useMutation({
-    mutationFn: (kind: string) => api<{ status?: string; inserted?: number; updated?: number; skipped?: number; deactivated?: number }>('/integrations/phidias/sync', { body: { kind, wait: true } }),
+    mutationFn: (kind: string) => api<{ status?: string; inserted?: number; updated?: number; skipped?: number; deactivated?: number; details?: { error?: string; action?: string } }>('/integrations/phidias/sync', { body: { kind, wait: true } }),
     onSuccess: (r, kind) => {
-      toast.success(`Sincronización ${KIND[kind].toLowerCase()}: +${r.inserted ?? 0} nuevos, ${r.updated ?? 0} actualizados, ${r.skipped ?? 0} sin cambios, ${r.deactivated ?? 0} desactivados`);
+      if (r.status === 'FAILED') toast.error(r.details?.error ?? `Sincronización ${KIND[kind].toLowerCase()} fallida`, { description: r.details?.action });
+      else toast.success(`Sincronización ${KIND[kind].toLowerCase()}: +${r.inserted ?? 0} nuevos, ${r.updated ?? 0} actualizados, ${r.skipped ?? 0} sin cambios, ${r.deactivated ?? 0} desactivados`);
       qc.invalidateQueries({ queryKey: ['phidias-status'] });
       qc.invalidateQueries({ queryKey: ['phidias-conflicts'] });
     },
@@ -42,11 +46,17 @@ export function IntegrationsPanel() {
   return (
     <div className="flex flex-col gap-4">
       {s.mock && <Alert tone="warning">Modo simulado: se usan datos de prueba (sin token de Phidias configurado).</Alert>}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      {s.relativesPermission?.denied && (
+        <Alert tone="danger" title="Phidias no autoriza la consulta de acudientes y contactos">
+          El token de integración no tiene el permiso <span className="font-mono">{s.relativesPermission.module}</span>. Solicite a Phidias habilitar para el usuario de la API los permisos <span className="font-mono">Person_Relative_Controller::getRelatives</span> y <span className="font-mono">people/details</span>, y luego pulse «Acudientes y contactos». Verificado {fmtDateTime(s.relativesPermission.checkedAt)}.
+        </Alert>
+      )}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <StatCard label="Estudiantes vinculados" value={s.linkedStudents} icon={<Users />} tone="primary" />
         <StatCard label="Activos" value={s.activeStudents} />
         <StatCard label="Con foto (S3)" value={s.studentsWithPhoto} icon={<Camera />} hint={s.photosEnabled ? 'Bucket configurado' : 'S3 no configurado'} />
         <StatCard label="Atenciones históricas" value={s.historicalEncounters} icon={<History />} />
+        <StatCard label="Acudientes vinculados" value={s.guardiansLinked} icon={<UsersRound />} hint={`${s.emergencyContactsLinked} contactos de emergencia`} />
       </div>
       <Card>
         <CardHeader>
@@ -58,7 +68,7 @@ export function IntegrationsPanel() {
         <CardContent>
           <p className="mb-3 text-sm text-muted">Idempotente: cada registro se identifica por su ID de Phidias y un hash de contenido; una segunda ejecución sin cambios no escribe nada. Nunca se sobrescriben datos clínicos locales.</p>
           <div className="flex flex-wrap gap-2">
-            {(['INCREMENTAL', 'FULL', 'PHOTOS', 'HISTORY'] as const).map((k) => (
+            {(['INCREMENTAL', 'FULL', 'RELATIVES', 'PHOTOS', 'HISTORY'] as const).map((k) => (
               <Button key={k} variant={k === 'FULL' ? 'primary' : 'outline'} onClick={() => sync.mutate(k)} loading={sync.isPending && sync.variables === k} disabled={sync.isPending}>
                 <RefreshCw className="h-4 w-4" /> {KIND[k]}
               </Button>
