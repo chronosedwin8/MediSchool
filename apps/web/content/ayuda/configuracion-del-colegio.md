@@ -12,6 +12,10 @@ Abra **Administración → Configuración**. Los cambios aplican a todo el coleg
 
 ![Configuración del colegio con tarjetas de seguridad, pases, medicación y canales](/ayuda/capturas/admin-configuracion.jpg "Administración → Configuración")
 
+## Modalidad de datos
+
+Elija **Con Phidias** (estudiantes y estructura sincronizados desde Phidias) o **Independiente de Phidias** (todo se administra en MediSchool). Al cambiarla aparece un aviso con sus efectos. Vea [Modalidades de datos](/ayuda/modalidades-de-datos).
+
 ## Colegio
 
 | Campo | Descripción |

@@ -20,7 +20,7 @@ export interface Me {
   tenant: { id: string; slug: string; name: string; country: string; timezone: string; locale: string };
   teacherGroups: { id: string; name: string; grade: string; subject: string | null }[];
   children: { id: string; name: string; code: string; group: string | null }[];
-  settings: { passTransitAlertMinutes: number; observationRecheckMinutes: number; medicationTimeWindowMinutes: number };
+  settings: { dataSource: 'PHIDIAS' | 'LOCAL'; passTransitAlertMinutes: number; observationRecheckMinutes: number; medicationTimeWindowMinutes: number };
 }
 
 export function useMe() {

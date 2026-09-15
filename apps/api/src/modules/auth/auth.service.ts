@@ -282,6 +282,7 @@ export class AuthService {
         teacherGroups: u.teacherGroups.map((tg) => ({ id: tg.groupId, name: tg.group.name, grade: tg.group.grade.name, subject: tg.subject })),
         children,
         settings: {
+          dataSource: settings.dataSource,
           passTransitAlertMinutes: settings.passTransitAlertMinutes,
           observationRecheckMinutes: settings.observationRecheckMinutes,
           medicationTimeWindowMinutes: settings.medicationTimeWindowMinutes,

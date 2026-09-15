@@ -4,11 +4,16 @@ import {
   type emergencyContactSchema,
   EMERGENCY_PROTOCOLS,
   ENCOUNTER_TEMPLATES,
+  type gradeUpsertSchema,
+  type groupUpsertSchema,
   type guardianLinkSchema,
   type invitationCreateSchema,
   PASS_STATE_LABELS,
   type PassState,
+  type sectionUpsertSchema,
+  type studentCreateSchema,
   type studentSearchSchema,
+  type studentUpdateSchema,
   timeInTz,
 } from '@sgee/shared';
 import type { z } from 'zod';
@@ -16,11 +21,16 @@ import { AccessService } from '../../common/access.service';
 import { AuditService } from '../../common/audit.service';
 import { type AuthUser, can, hasRole, isClinical, type RequestMeta } from '../../common/auth';
 import { randomCode } from '../../common/crypto';
-import { forbidden, notFound } from '../../common/errors';
+import { badRequest, conflict, forbidden, notFound, Problem } from '../../common/errors';
 import { PrismaService } from '../../common/prisma.service';
-import { personName, studentInclude, studentSummary } from '../../common/serializers';
+import { LOCAL_PHOTO_PREFIX, personName, studentInclude, studentPhotoUrl, studentSummary } from '../../common/serializers';
+import { TenantSettingsService } from '../../common/tenant-settings.service';
 import { config } from '../../config';
-import { PhotoService } from '../files/storage.service';
+import { MAX_PHOTO_BYTES, PhotoService, sniffMime, StorageService } from '../files/storage.service';
+
+/** Fields that Phidias owns for students linked to Phidias (read-only while the school works in Phidias mode). */
+const PHIDIAS_OWNED_FIELDS = ['code', 'firstName', 'lastName', 'documentType', 'documentNumber', 'birthDate', 'sex', 'groupId', 'status'] as const;
+const FIELD_LABELS: Record<string, string> = { code: 'código', firstName: 'nombres', lastName: 'apellidos', documentType: 'tipo de documento', documentNumber: 'documento', birthDate: 'fecha de nacimiento', sex: 'sexo', groupId: 'grupo', status: 'estado' };
 
 const OPEN_STATES: PassState[] = ['REQUESTED', 'IN_TRANSIT', 'RECEIVED', 'IN_CARE', 'OBSERVATION', 'RETURNED_TO_CLASS', 'WAITING_GUARDIAN', 'EXIT_AUTHORIZED', 'HANDED_OVER', 'TRANSFERRED_IPS'];
 
@@ -31,7 +41,17 @@ export class PeopleService {
     private readonly access: AccessService,
     private readonly audit: AuditService,
     private readonly photos: PhotoService,
+    private readonly storage: StorageService,
+    private readonly settings: TenantSettingsService,
   ) {}
+
+  private async dataSource(tx: Tx, tenantId: string) {
+    return (await this.settings.get(tx, tenantId)).dataSource;
+  }
+
+  private phidiasLink(tx: Tx, studentId: string) {
+    return tx.externalId.findFirst({ where: { source: 'phidias', entity: 'student', localId: studentId, missingSince: null }, select: { id: true } });
+  }
 
   /** Students the user may see, as a Prisma filter. */
   private async scopeFilter(tx: Tx, user: AuthUser): Promise<Prisma.StudentWhereInput> {
@@ -95,8 +115,30 @@ export class PeopleService {
       const student = await this.access.assertStudent(tx, user, studentId, clinical ? 'clinical' : 'basic', meta);
       const guardians = await tx.studentGuardian.findMany({ where: { studentId, active: true }, include: { guardian: { include: { person: true } } }, orderBy: { priority: 'asc' } });
       const contacts = await tx.emergencyContact.findMany({ where: { studentId, active: true }, orderBy: { createdAt: 'asc' } });
+      const [source, link] = await Promise.all([this.dataSource(tx, user.tenantId), this.phidiasLink(tx, studentId)]);
       const base = {
         ...studentSummary(student, { photosEnabled: this.photos.enabled }),
+        dataSource: source,
+        phidiasLinked: !!link,
+        phidiasLocked: source === 'PHIDIAS' && !!link,
+        edit: can(user, 'people:write')
+          ? {
+              code: student.code,
+              firstName: student.person.firstName,
+              lastName: student.person.lastName,
+              documentType: student.person.documentType,
+              documentNumber: student.person.documentNumber,
+              birthDate: student.person.birthDate?.toISOString().slice(0, 10) ?? null,
+              sex: student.person.sex,
+              groupId: student.currentGroupId,
+              email: student.person.email,
+              phone: student.person.phone,
+              mobile: student.person.mobile,
+              address: student.person.address,
+              transport: student.transport,
+              status: student.status,
+            }
+          : undefined,
         document: hasRole(user, 'TEACHER') ? null : { type: student.person.documentType, number: student.person.documentNumber },
         enrollmentStatus: student.enrollmentStatus,
         transport: student.transport,
@@ -145,9 +187,190 @@ export class PeopleService {
     });
   }
 
-  async photoUrl(user: AuthUser, studentId: string, refresh: boolean) {
+  /** Photo for any role allowed to see the student: uploaded photos are streamed, Phidias photos redirect to S3. */
+  async photo(user: AuthUser, studentId: string, refresh: boolean): Promise<{ redirect: string } | { data: Buffer; mimeType: string } | null> {
     const s = await this.prisma.forUser(user, (tx) => this.access.assertStudent(tx, user, studentId, 'basic'));
-    return this.photos.signedUrl(s.person.photoKey, s.code, refresh);
+    const key = s.person.photoKey;
+    if (key?.startsWith(LOCAL_PHOTO_PREFIX)) {
+      const file = await this.prisma.forUser(user, (tx) => tx.storedFile.findUnique({ where: { id: key.slice(LOCAL_PHOTO_PREFIX.length) } }));
+      return file ? { data: await this.storage.read(file), mimeType: file.mimeType } : null;
+    }
+    const url = await this.photos.signedUrl(key, s.code, refresh);
+    return url ? { redirect: url } : null;
+  }
+
+  async uploadPhoto(user: AuthUser, studentId: string, file: { buffer: Buffer; size: number } | undefined, meta: RequestMeta) {
+    if (!can(user, 'people:write', 'clinical:write')) throw forbidden('No tiene permiso para cambiar la foto del estudiante.');
+    if (!file?.buffer?.length) throw badRequest('FILE_REQUIRED', 'Adjunte una imagen.');
+    if (file.size > MAX_PHOTO_BYTES) throw new Problem(413, 'FILE_TOO_LARGE', 'La foto supera 5 MB.');
+    const mime = sniffMime(file.buffer);
+    if (!mime?.startsWith('image/')) throw new Problem(415, 'PHOTO_TYPE_NOT_ALLOWED', 'La foto debe ser una imagen JPG, PNG o WEBP.');
+    const student = await this.prisma.forUser(user, (tx) => this.access.assertStudent(tx, user, studentId, 'basic'));
+    const stored = await this.storage.save(user, { buffer: file.buffer, originalName: `foto-${student.code}.${mime.split('/')[1]}`, kind: 'STUDENT_PHOTO', ownerPersonId: student.personId });
+    return this.prisma.forUser(user, async (tx) => {
+      const photoKey = `${LOCAL_PHOTO_PREFIX}${stored.id}`;
+      const photoHash = stored.sha256.slice(0, 16);
+      await tx.person.update({ where: { id: student.personId }, data: { photoKey, photoHash } });
+      await this.audit.log(tx, { tenantId: user.tenantId, actor: user, action: 'people.photo_uploaded', entity: 'student', entityId: studentId, after: { fileId: stored.id, size: stored.size }, meta });
+      return { photoUrl: studentPhotoUrl(studentId, { photoKey, photoHash }, true) };
+    });
+  }
+
+  async removePhoto(user: AuthUser, studentId: string, meta: RequestMeta) {
+    if (!can(user, 'people:write', 'clinical:write')) throw forbidden('No tiene permiso para cambiar la foto del estudiante.');
+    return this.prisma.forUser(user, async (tx) => {
+      const student = await this.access.assertStudent(tx, user, studentId, 'basic');
+      await tx.person.update({ where: { id: student.personId }, data: { photoKey: null, photoHash: null } });
+      await this.audit.log(tx, { tenantId: user.tenantId, actor: user, action: 'people.photo_removed', entity: 'student', entityId: studentId, meta });
+      return { photoUrl: null };
+    });
+  }
+
+  // ── student master data (both modes; Phidias-owned fields locked for linked students in Phidias mode) ──
+  async createStudent(user: AuthUser, b: z.infer<typeof studentCreateSchema>, meta: RequestMeta) {
+    return this.prisma.forUser(user, async (tx) => {
+      const tenantId = user.tenantId;
+      if (await tx.student.findUnique({ where: { tenantId_code: { tenantId, code: b.code } } })) throw conflict('STUDENT_CODE_IN_USE', `Ya existe un estudiante con el código ${b.code}.`);
+      if (b.documentNumber && (await tx.person.findFirst({ where: { kind: 'STUDENT', documentNumber: b.documentNumber } }))) throw conflict('STUDENT_DOCUMENT_IN_USE', 'Ya existe un estudiante con ese número de documento.');
+      if (b.groupId && !(await tx.group.findUnique({ where: { id: b.groupId } }))) throw notFound('Grupo');
+      const person = await tx.person.create({
+        data: { tenantId, kind: 'STUDENT', source: 'LOCAL', firstName: b.firstName, lastName: b.lastName, documentType: b.documentType, documentNumber: b.documentNumber, birthDate: b.birthDate ? new Date(`${b.birthDate}T00:00:00Z`) : null, sex: b.sex ?? null, email: b.email, phone: b.phone, mobile: b.mobile, address: b.address, createdBy: user.id },
+      });
+      const student = await tx.student.create({ data: { tenantId, personId: person.id, code: b.code, currentGroupId: b.groupId ?? null, transport: b.transport, status: 'ACTIVE', enrollmentStatus: 'activo' } });
+      if (b.groupId) await tx.enrollment.create({ data: { tenantId, studentId: student.id, groupId: b.groupId, yearLabel: String(new Date().getFullYear()), status: 'activo' } });
+      await this.audit.log(tx, { tenantId, actor: user, action: 'people.student_created', entity: 'student', entityId: student.id, after: { code: b.code, groupId: b.groupId ?? null }, meta });
+      return { id: student.id };
+    });
+  }
+
+  async updateStudent(user: AuthUser, studentId: string, b: z.infer<typeof studentUpdateSchema>, meta: RequestMeta) {
+    return this.prisma.forUser(user, async (tx) => {
+      const before = await tx.student.findUnique({ where: { id: studentId }, include: { person: true } });
+      if (!before) throw notFound('Estudiante');
+      const current: Record<string, unknown> = {
+        code: before.code,
+        firstName: before.person.firstName,
+        lastName: before.person.lastName,
+        documentType: before.person.documentType,
+        documentNumber: before.person.documentNumber,
+        birthDate: before.person.birthDate?.toISOString().slice(0, 10) ?? null,
+        sex: before.person.sex,
+        groupId: before.currentGroupId,
+        status: before.status,
+      };
+      const changed = PHIDIAS_OWNED_FIELDS.filter((f) => b[f] !== undefined && (b[f] ?? null) !== (current[f] ?? null));
+      if (changed.length && (await this.dataSource(tx, user.tenantId)) === 'PHIDIAS' && (await this.phidiasLink(tx, studentId))) {
+        throw conflict('PHIDIAS_OWNED', `Estos datos se administran en Phidias: ${changed.map((f) => FIELD_LABELS[f]).join(', ')}. Corríjalos en Phidias o cambie el colegio a modalidad independiente.`);
+      }
+      if (b.code !== undefined && b.code !== before.code && (await tx.student.findUnique({ where: { tenantId_code: { tenantId: user.tenantId, code: b.code } } }))) throw conflict('STUDENT_CODE_IN_USE', `Ya existe un estudiante con el código ${b.code}.`);
+      if (b.groupId && b.groupId !== before.currentGroupId && !(await tx.group.findUnique({ where: { id: b.groupId } }))) throw notFound('Grupo');
+      const inactive = b.status === 'INACTIVE';
+      await tx.person.update({
+        where: { id: before.personId },
+        data: {
+          firstName: b.firstName,
+          lastName: b.lastName,
+          documentType: b.documentType,
+          documentNumber: b.documentNumber,
+          birthDate: b.birthDate === undefined ? undefined : b.birthDate ? new Date(`${b.birthDate}T00:00:00Z`) : null,
+          sex: b.sex,
+          email: b.email,
+          phone: b.phone,
+          mobile: b.mobile,
+          address: b.address,
+          ...(b.status && { status: b.status, inactiveReason: inactive ? (b.inactiveReason ?? 'withdrawn') : null }),
+          updatedBy: user.id,
+        },
+      });
+      await tx.student.update({
+        where: { id: studentId },
+        data: { code: b.code, currentGroupId: b.groupId, transport: b.transport, ...(b.status && { status: b.status, inactiveReason: inactive ? (b.inactiveReason ?? 'withdrawn') : null }) },
+      });
+      if (b.groupId && b.groupId !== before.currentGroupId) {
+        const yearLabel = String(new Date().getFullYear());
+        await tx.enrollment.upsert({ where: { studentId_yearLabel: { studentId, yearLabel } }, create: { tenantId: user.tenantId, studentId, groupId: b.groupId, yearLabel, status: 'activo' }, update: { groupId: b.groupId } });
+      }
+      await this.audit.log(tx, { tenantId: user.tenantId, actor: user, action: 'people.student_updated', entity: 'student', entityId: studentId, after: { fields: Object.keys(b).filter((k) => b[k as keyof typeof b] !== undefined) }, meta });
+      return { id: studentId };
+    });
+  }
+
+  // ── academic structure (independent mode) ────────────────────────────────
+  private async assertStructureEditable(tx: Tx, user: AuthUser) {
+    if (!can(user, 'people:write', 'admin:settings')) throw forbidden();
+    if ((await this.dataSource(tx, user.tenantId)) === 'PHIDIAS') throw conflict('PHIDIAS_MANAGED', 'En modalidad Phidias las secciones, grados y grupos se administran en Phidias.');
+  }
+
+  async createSection(user: AuthUser, b: z.infer<typeof sectionUpsertSchema>, meta: RequestMeta) {
+    return this.prisma.forUser(user, async (tx) => {
+      await this.assertStructureEditable(tx, user);
+      if (await tx.section.findUnique({ where: { tenantId_code: { tenantId: user.tenantId, code: b.code } } })) throw conflict('CODE_IN_USE', `Ya existe una sección con el código ${b.code}.`);
+      const r = await tx.section.create({ data: { tenantId: user.tenantId, ...b } });
+      await this.audit.log(tx, { tenantId: user.tenantId, actor: user, action: 'structure.section_created', entity: 'section', entityId: r.id, after: b, meta });
+      return r;
+    });
+  }
+
+  async updateSection(user: AuthUser, id: string, b: Partial<z.infer<typeof sectionUpsertSchema>>, meta: RequestMeta) {
+    return this.prisma.forUser(user, async (tx) => {
+      await this.assertStructureEditable(tx, user);
+      const before = await tx.section.findUnique({ where: { id } });
+      if (!before) throw notFound('Sección');
+      if (b.code && b.code !== before.code && (await tx.section.findUnique({ where: { tenantId_code: { tenantId: user.tenantId, code: b.code } } }))) throw conflict('CODE_IN_USE', `Ya existe una sección con el código ${b.code}.`);
+      const r = await tx.section.update({ where: { id }, data: b });
+      await this.audit.log(tx, { tenantId: user.tenantId, actor: user, action: 'structure.section_updated', entity: 'section', entityId: id, before, after: r, meta });
+      return r;
+    });
+  }
+
+  async createGrade(user: AuthUser, b: z.infer<typeof gradeUpsertSchema>, meta: RequestMeta) {
+    return this.prisma.forUser(user, async (tx) => {
+      await this.assertStructureEditable(tx, user);
+      if (!(await tx.section.findUnique({ where: { id: b.sectionId } }))) throw notFound('Sección');
+      if (await tx.grade.findUnique({ where: { tenantId_code: { tenantId: user.tenantId, code: b.code } } })) throw conflict('CODE_IN_USE', `Ya existe un grado con el código ${b.code}.`);
+      const r = await tx.grade.create({ data: { tenantId: user.tenantId, ...b } });
+      await this.audit.log(tx, { tenantId: user.tenantId, actor: user, action: 'structure.grade_created', entity: 'grade', entityId: r.id, after: b, meta });
+      return r;
+    });
+  }
+
+  async updateGrade(user: AuthUser, id: string, b: Partial<z.infer<typeof gradeUpsertSchema>>, meta: RequestMeta) {
+    return this.prisma.forUser(user, async (tx) => {
+      await this.assertStructureEditable(tx, user);
+      const before = await tx.grade.findUnique({ where: { id } });
+      if (!before) throw notFound('Grado');
+      if (b.sectionId && !(await tx.section.findUnique({ where: { id: b.sectionId } }))) throw notFound('Sección');
+      if (b.code && b.code !== before.code && (await tx.grade.findUnique({ where: { tenantId_code: { tenantId: user.tenantId, code: b.code } } }))) throw conflict('CODE_IN_USE', `Ya existe un grado con el código ${b.code}.`);
+      const r = await tx.grade.update({ where: { id }, data: b });
+      await this.audit.log(tx, { tenantId: user.tenantId, actor: user, action: 'structure.grade_updated', entity: 'grade', entityId: id, before, after: r, meta });
+      return r;
+    });
+  }
+
+  async createGroup(user: AuthUser, b: z.infer<typeof groupUpsertSchema>, meta: RequestMeta) {
+    return this.prisma.forUser(user, async (tx) => {
+      await this.assertStructureEditable(tx, user);
+      if (!(await tx.grade.findUnique({ where: { id: b.gradeId } }))) throw notFound('Grado');
+      if (await tx.group.findUnique({ where: { tenantId_code: { tenantId: user.tenantId, code: b.code } } })) throw conflict('CODE_IN_USE', `Ya existe un grupo con el código ${b.code}.`);
+      const r = await tx.group.create({ data: { tenantId: user.tenantId, ...b } });
+      await this.audit.log(tx, { tenantId: user.tenantId, actor: user, action: 'structure.group_created', entity: 'group', entityId: r.id, after: b, meta });
+      return r;
+    });
+  }
+
+  async updateGroup(user: AuthUser, id: string, b: Partial<z.infer<typeof groupUpsertSchema>>, meta: RequestMeta) {
+    return this.prisma.forUser(user, async (tx) => {
+      await this.assertStructureEditable(tx, user);
+      const before = await tx.group.findUnique({ where: { id }, include: { _count: { select: { students: { where: { status: 'ACTIVE' } } } } } });
+      if (!before) throw notFound('Grupo');
+      if (b.active === false && before._count.students > 0) throw conflict('GROUP_HAS_STUDENTS', `El grupo tiene ${before._count.students} estudiantes activos. Muévalos a otro grupo antes de desactivarlo.`);
+      if (b.gradeId && !(await tx.grade.findUnique({ where: { id: b.gradeId } }))) throw notFound('Grado');
+      if (b.code && b.code !== before.code && (await tx.group.findUnique({ where: { tenantId_code: { tenantId: user.tenantId, code: b.code } } }))) throw conflict('CODE_IN_USE', `Ya existe un grupo con el código ${b.code}.`);
+      const { _count: _c, ...plain } = before;
+      const r = await tx.group.update({ where: { id }, data: b });
+      await this.audit.log(tx, { tenantId: user.tenantId, actor: user, action: 'structure.group_updated', entity: 'group', entityId: id, before: plain, after: r, meta });
+      return r;
+    });
   }
 
   /** Critical sheet for the one-click EMERGENCY mode (PLAN §2.3). */
@@ -230,18 +453,28 @@ export class PeopleService {
     });
   }
 
-  async structure(user: AuthUser) {
+  async structure(user: AuthUser, includeInactive = false) {
     return this.prisma.forUser(user, async (tx) => {
+      const all = includeInactive && can(user, 'people:write', 'admin:settings');
       const sections = await tx.section.findMany({
-        orderBy: { sortOrder: 'asc' },
-        include: { grades: { orderBy: { sortOrder: 'asc' }, include: { groups: { where: { active: true }, orderBy: { code: 'asc' }, include: { _count: { select: { students: { where: { status: 'ACTIVE' } } } } } } } } },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        include: { grades: { orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], include: { groups: { where: all ? {} : { active: true }, orderBy: { code: 'asc' }, include: { _count: { select: { students: { where: { status: 'ACTIVE' } } } } } } } } },
       });
       const mine = hasRole(user, 'TEACHER') ? new Set(await this.access.teacherGroupIds(tx, user)) : new Set<string>();
       return sections.map((s) => ({
         id: s.id,
         code: s.code,
         name: s.name,
-        grades: s.grades.map((g) => ({ id: g.id, name: g.name, groups: g.groups.map((gr) => ({ id: gr.id, code: gr.code, name: gr.name, students: gr._count.students, mine: mine.has(gr.id) })) })),
+        sortOrder: s.sortOrder,
+        external: !!s.externalId,
+        grades: s.grades.map((g) => ({
+          id: g.id,
+          code: g.code,
+          name: g.name,
+          sortOrder: g.sortOrder,
+          external: !!g.externalId,
+          groups: g.groups.map((gr) => ({ id: gr.id, code: gr.code, name: gr.name, active: gr.active, external: !!gr.externalId, students: gr._count.students, mine: mine.has(gr.id) })),
+        })),
       }));
     });
   }
@@ -275,7 +508,7 @@ export class PeopleService {
             id: s.id,
             code: s.code,
             name: personName(s.person),
-            photoUrl: s.person.photoKey && this.photos.enabled ? `/api/v1/students/${s.id}/photo` : null,
+            photoUrl: studentPhotoUrl(s.id, s.person, this.photos.enabled),
             medicalAlert: s.person.allergies.length > 0 || s.person.conditions.length > 0,
             openPass: s.passes[0] ? { id: s.passes[0].id, state: s.passes[0].state, label: PASS_STATE_LABELS[s.passes[0].state as PassState], requestedAt: s.passes[0].requestedAt } : null,
           })),

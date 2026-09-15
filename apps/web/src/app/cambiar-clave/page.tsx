@@ -4,9 +4,18 @@ import { Alert, Button, Card, Field, Input } from '@sgee/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { ClientOnly, FormPageFallback } from '@/components/client-only';
 import { api, errorMessage } from '@/lib/api';
 
 export default function ChangePasswordPage() {
+  return (
+    <ClientOnly fallback={<FormPageFallback />}>
+      <ChangePasswordForm />
+    </ClientOnly>
+  );
+}
+
+function ChangePasswordForm() {
   const router = useRouter();
   const qc = useQueryClient();
   const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirm: '' });

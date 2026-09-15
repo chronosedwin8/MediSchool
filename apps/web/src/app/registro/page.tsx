@@ -3,6 +3,7 @@
 import { Alert, Button, Card, Field, Input } from '@sgee/ui';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
+import { ClientOnly, FormPageFallback } from '@/components/client-only';
 import { api, errorMessage } from '@/lib/api';
 
 function Inner() {
@@ -77,8 +78,10 @@ function Inner() {
 
 export default function RegisterPage() {
   return (
-    <Suspense>
-      <Inner />
-    </Suspense>
+    <ClientOnly fallback={<FormPageFallback />}>
+      <Suspense fallback={<FormPageFallback />}>
+        <Inner />
+      </Suspense>
+    </ClientOnly>
   );
 }

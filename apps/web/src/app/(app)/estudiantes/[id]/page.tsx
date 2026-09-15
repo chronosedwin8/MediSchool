@@ -2,13 +2,14 @@
 
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, EmptyState, Field, Input, PatientHeader, Select, Skeleton, StatusTimeline, Textarea } from '@sgee/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardPlus, Copy, FileDown, History, Link2, Plus, RefreshCw, Siren, UserPlus } from 'lucide-react';
+import { Camera, CheckCircle2, ClipboardPlus, Copy, FileDown, History, Link2, Pencil, Plus, RefreshCw, Siren, UserMinus, UserPlus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { use, useState } from 'react';
 import { toast } from 'sonner';
 import { Dialog, TabPanel, Tabs } from '@/components/dialog';
 import { EmergencyDialog } from '@/components/emergency-dialog';
 import { HealthProfileEditor } from '@/components/health-profile';
+import { type StudentEdit, StudentFormDialog, StudentPhotoDialog } from '@/components/student-form';
 import { api, idem, openFile } from '@/lib/api';
 import { fmtDate, fmtDateTime, RELATIONSHIP_LABELS } from '@/lib/format';
 import { can, useMe } from '@/lib/session';
@@ -28,6 +29,10 @@ interface StudentDetail {
   section: { name: string } | null;
   document: { type: string | null; number: string | null } | null;
   transport: string | null;
+  dataSource: 'PHIDIAS' | 'LOCAL';
+  phidiasLinked: boolean;
+  phidiasLocked: boolean;
+  edit?: StudentEdit;
   guardians: { linkId: string; personId: string; name: string; relationship: string; isPrimary: boolean; canPickUp: boolean; legalCustody: boolean; priority: number; restrictions: string | null; judicialRestriction: boolean; phone: string | null; email: string | null }[];
   emergencyContacts: { id: string; name: string; relationship: string; phone: string; canPickUp: boolean; verified: boolean }[];
   medicalAlert?: boolean;
@@ -56,6 +61,20 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
   const [contactOpen, setContactOpen] = useState(false);
   const [guardianOpen, setGuardianOpen] = useState(false);
   const [invite, setInvite] = useState<{ code: string; link: string } | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [guardianEdit, setGuardianEdit] = useState<StudentDetail['guardians'][number] | null>(null);
+  const updateContact = useMutation({
+    mutationFn: (x: { contactId: string; body: Record<string, unknown> }) => api(`/students/${id}/emergency-contacts/${x.contactId}`, { method: 'PATCH', body: x.body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['student', id] }),
+  });
+  const unlinkGuardian = useMutation({
+    mutationFn: (linkId: string) => api(`/students/${id}/guardians/${linkId}`, { method: 'PATCH', body: { active: false } }),
+    onSuccess: () => {
+      toast.success('Acudiente desvinculado');
+      qc.invalidateQueries({ queryKey: ['student', id] });
+    },
+  });
   const clinical = can(me, 'clinical:read');
   const s = useQuery({ queryKey: ['student', id], queryFn: () => api<StudentDetail>(`/students/${id}`) });
   const timeline = useQuery({ queryKey: ['timeline', id], queryFn: () => api<Timeline>(`/students/${id}/timeline`), enabled: tab === 'historial' && clinical });
@@ -113,7 +132,17 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
                 <ClipboardPlus className="h-4 w-4" /> Atender
               </Button>
             )}
-            {can(me, 'admin:integrations') && (
+            {can(me, 'people:write', 'clinical:write') && (
+              <Button size="sm" variant="outline" onClick={() => setPhotoOpen(true)}>
+                <Camera className="h-4 w-4" /> Foto
+              </Button>
+            )}
+            {st.edit && (
+              <Button size="sm" variant="outline" onClick={() => setEditOpen(true)}>
+                <Pencil className="h-4 w-4" /> Editar datos
+              </Button>
+            )}
+            {st.dataSource === 'PHIDIAS' && st.phidiasLinked && can(me, 'admin:integrations') && (
               <Button size="sm" variant="ghost" onClick={() => syncOne.mutate()} loading={syncOne.isPending} aria-label="Sincronizar con Phidias">
                 <RefreshCw className="h-4 w-4" />
               </Button>
@@ -172,6 +201,16 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
                         {g.email && ` · ${g.email}`}
                       </p>
                       {g.restrictions && <p className="mt-1 text-sm text-red-700 dark:text-red-400">{g.restrictions}</p>}
+                      {can(me, 'people:write', 'clinical:write') && (
+                        <div className="mt-2 flex gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => setGuardianEdit(g)}>
+                            <Pencil className="h-4 w-4" /> Editar
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => window.confirm(`¿Desvincular a ${g.name} de este estudiante?`) && unlinkGuardian.mutate(g.linkId)}>
+                            <UserMinus className="h-4 w-4" /> Desvincular
+                          </Button>
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -200,6 +239,18 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
                       </span>
                       {c.canPickUp && <Badge tone="success">Puede recoger</Badge>}
                       {!c.verified && <Badge tone="info">Por verificar</Badge>}
+                      {can(me, 'people:write', 'clinical:write') && (
+                        <span className="flex gap-1">
+                          {!c.verified && (
+                            <Button size="icon-sm" variant="ghost" aria-label={`Verificar contacto ${c.name}`} onClick={() => updateContact.mutate({ contactId: c.id, body: { verified: true } })}>
+                              <CheckCircle2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Button size="icon-sm" variant="ghost" aria-label={`Quitar contacto ${c.name}`} onClick={() => window.confirm(`¿Quitar a ${c.name} de los contactos de emergencia?`) && updateContact.mutate({ contactId: c.id, body: { active: false } })}>
+                            <UserMinus className="h-4 w-4" />
+                          </Button>
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -367,6 +418,9 @@ export default function StudentPage({ params }: { params: Promise<{ id: string }
       {clinical && <EmergencyDialog open={emergency} onOpenChange={setEmergency} studentId={id} />}
       {contactOpen && <ContactDialog studentId={id} onClose={() => setContactOpen(false)} />}
       {guardianOpen && <GuardianDialog studentId={id} onClose={() => setGuardianOpen(false)} />}
+      {guardianEdit && <GuardianEditDialog studentId={id} guardian={guardianEdit} onClose={() => setGuardianEdit(null)} />}
+      {editOpen && st.edit && <StudentFormDialog studentId={id} initial={st.edit} locked={st.phidiasLocked} onClose={() => setEditOpen(false)} />}
+      {photoOpen && <StudentPhotoDialog studentId={id} name={st.name} photoUrl={st.photoUrl} onClose={() => setPhotoOpen(false)} />}
       {invite && (
         <Dialog open onOpenChange={() => setInvite(null)} title="Invitación para acudiente">
           <p className="text-sm text-muted">Comparta este código o enlace. Vence en 14 días y solo puede usarse una vez.</p>
@@ -408,6 +462,47 @@ function ContactDialog({ studentId, onClose }: { studentId: string; onClose: () 
         <label className="flex items-center gap-2 text-sm sm:col-span-2">
           <input type="checkbox" className="h-5 w-5 accent-primary-700" checked={v.canPickUp} onChange={(e) => setV({ ...v, canPickUp: e.target.checked })} /> Autorizado para recoger al estudiante
         </label>
+      </div>
+    </Dialog>
+  );
+}
+
+function GuardianEditDialog({ studentId, guardian, onClose }: { studentId: string; guardian: StudentDetail['guardians'][number]; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [v, setV] = useState({ relationship: guardian.relationship, isPrimary: guardian.isPrimary, canPickUp: guardian.canPickUp, legalCustody: guardian.legalCustody, judicialRestriction: guardian.judicialRestriction, restrictions: guardian.restrictions ?? '' });
+  const save = useMutation({
+    mutationFn: () => api(`/students/${studentId}/guardians/${guardian.linkId}`, { method: 'PATCH', body: { ...v, canPickUp: v.judicialRestriction ? false : v.canPickUp, restrictions: v.restrictions || null } }),
+    onSuccess: () => {
+      toast.success('Acudiente actualizado');
+      qc.invalidateQueries({ queryKey: ['student', studentId] });
+      onClose();
+    },
+  });
+  const check = (key: 'isPrimary' | 'canPickUp' | 'legalCustody' | 'judicialRestriction', label: string) => (
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" className="h-5 w-5 accent-primary-700" checked={v[key]} onChange={(e) => setV({ ...v, [key]: e.target.checked })} /> {label}
+    </label>
+  );
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()} title={`Editar acudiente · ${guardian.name}`} footer={<Button onClick={() => save.mutate()} loading={save.isPending}>Guardar</Button>}>
+      <div className="grid gap-3">
+        <Field label="Parentesco">
+          <Select value={v.relationship} onChange={(e) => setV({ ...v, relationship: e.target.value })}>
+            {Object.entries(RELATIONSHIP_LABELS).map(([k, l]) => (
+              <option key={k} value={k}>
+                {l}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {check('isPrimary', 'Acudiente principal')}
+        {check('canPickUp', 'Puede recoger al estudiante')}
+        {check('legalCustody', 'Tiene custodia legal')}
+        {check('judicialRestriction', 'Restricción judicial (nunca puede recoger)')}
+        {v.judicialRestriction && <Alert tone="danger">Con restricción judicial, esta persona no aparecerá como opción para recoger y portería no podrá entregarle al estudiante.</Alert>}
+        <Field label="Restricciones u observaciones" hint="Visible para enfermería, portería y administración.">
+          <Textarea rows={2} value={v.restrictions} onChange={(e) => setV({ ...v, restrictions: e.target.value })} />
+        </Field>
       </div>
     </Dialog>
   );

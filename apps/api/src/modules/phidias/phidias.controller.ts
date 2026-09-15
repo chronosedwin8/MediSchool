@@ -31,6 +31,7 @@ export class PhidiasController {
   @Post('sync')
   async run(@CurrentUser() user: AuthUser, @Body(zp(syncSchema)) body: z.infer<typeof syncSchema>) {
     const t = user.tenantId;
+    await this.sync.assertPhidiasMode(t);
     if (body.wait) {
       if (body.kind === 'PHOTOS') return this.sync.syncPhotos(t, user.id);
       if (body.kind === 'HISTORY') return this.sync.importHistory(t, user.id);
@@ -44,6 +45,7 @@ export class PhidiasController {
 
   @Post('sync-one/:studentId')
   async syncOne(@CurrentUser() user: AuthUser, @Param('studentId') studentId: string) {
+    await this.sync.assertPhidiasMode(user.tenantId);
     const link = await this.prisma.forUser(user, (tx) => tx.externalId.findFirst({ where: { source: 'phidias', entity: 'student', localId: studentId } }));
     if (!link) throw notFound('Vínculo con Phidias del estudiante');
     const student = await this.sync.syncStudents(user.tenantId, 'ONE', user.id, link.externalId);

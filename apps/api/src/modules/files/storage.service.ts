@@ -25,6 +25,7 @@ export function sniffMime(buf: Buffer): string | null {
 }
 
 export const FILE_KINDS = ['PRESCRIPTION', 'INJURY_PHOTO', 'VACCINE_CARD', 'MEDICAL_CERTIFICATE', 'SPECIALIST_CONCEPT', 'EXCUSE', 'SIGNATURE', 'ATTACHMENT', 'EXPORT'] as const;
+export const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 @Injectable()
 export class StorageService {
@@ -180,7 +181,7 @@ export class PhotoService {
    * by code: another school (or the demo tenant) may reuse a code that belongs to a real student.
    */
   async signedUrl(photoKey: string | null, _code?: string, force = false): Promise<string | null> {
-    if (!this.enabled || !photoKey) return null;
+    if (!this.enabled || !photoKey || photoKey.startsWith('local:')) return null;
     const cached = this.cache.get(photoKey);
     if (!force && cached && cached.expires > Date.now()) return cached.url;
     const url = await getSignedUrl(this.client(), new GetObjectCommand({ Bucket: config().S3_PHOTOS_BUCKET!, Key: photoKey }), { expiresIn: 3600 });

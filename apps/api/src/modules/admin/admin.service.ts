@@ -204,6 +204,16 @@ export class AdminService implements OnModuleInit {
       const t = await tx.tenant.findUniqueOrThrow({ where: { id: user.tenantId } });
       const merged = tenantSettingsSchema.parse({ ...(t.settings as object), ...(b.settings ?? {}) });
       await tx.$executeRaw`UPDATE core.tenants SET name = ${b.name ?? t.name}, timezone = ${b.timezone ?? t.timezone}, logo_url = ${b.logoUrl === undefined ? t.logoUrl : b.logoUrl}, settings = ${JSON.stringify(merged)}::jsonb, updated_at = now() WHERE id = ${user.tenantId}::uuid`;
+      const previousSource = tenantSettingsSchema.parse(t.settings ?? {}).dataSource;
+      if (merged.dataSource !== previousSource) {
+        // Independent mode stops every Phidias job; Phidias mode re-enables the scheduled sync.
+        await tx.integrationSetting.upsert({
+          where: { tenantId_provider: { tenantId: user.tenantId, provider: 'PHIDIAS' } },
+          create: { tenantId: user.tenantId, provider: 'PHIDIAS', enabled: merged.dataSource === 'PHIDIAS' },
+          update: { enabled: merged.dataSource === 'PHIDIAS' },
+        });
+        await this.audit.log(tx, { tenantId: user.tenantId, actor: user, action: 'admin.data_source_changed', entity: 'tenant', entityId: user.tenantId, before: { dataSource: previousSource }, after: { dataSource: merged.dataSource }, meta });
+      }
       await this.audit.log(tx, { tenantId: user.tenantId, actor: user, action: 'admin.settings_updated', entity: 'tenant', entityId: user.tenantId, before: t.settings, after: merged, meta });
       this.settings.invalidate(user.tenantId);
       return { settings: merged };

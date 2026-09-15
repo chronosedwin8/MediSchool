@@ -63,7 +63,20 @@ export const userUpdateSchema = userCreateSchema.partial().extend({
   active: z.boolean().optional(),
 });
 
+/**
+ * Where the student master data lives:
+ *  - PHIDIAS: students, structure (and photos/relatives when available) are synchronized from Phidias;
+ *    Phidias-owned fields are read-only in MediSchool.
+ *  - LOCAL: independent mode — everything is created and maintained inside MediSchool.
+ */
+export const DATA_SOURCES = ['PHIDIAS', 'LOCAL'] as const;
+export type DataSource = (typeof DATA_SOURCES)[number];
+export function dataSourceOf(settings: unknown): DataSource {
+  return (settings as { dataSource?: unknown } | null)?.dataSource === 'PHIDIAS' ? 'PHIDIAS' : 'LOCAL';
+}
+
 export const tenantSettingsSchema = z.object({
+  dataSource: z.enum(DATA_SOURCES).default('LOCAL'),
   timezone: z.string().default('America/Bogota'),
   locale: z.enum(['es-CO', 'es', 'en', 'de', 'pt']).default('es-CO'),
   mfaEnforced: z.boolean().default(false),
@@ -110,6 +123,49 @@ export const studentSearchSchema = paginationQuery.extend({
   status: z.enum(['ACTIVE', 'INACTIVE', 'ALL']).default('ACTIVE'),
   withAlerts: z.coerce.boolean().optional(),
 });
+
+export const STUDENT_DOCUMENT_TYPES = ['RC', 'TI', 'CC', 'CE', 'PA', 'PPT', 'NIT', 'OTRO'] as const;
+const nullableText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .optional()
+    .nullable()
+    .transform((v) => (v ? v : null));
+
+export const studentCreateSchema = z.object({
+  code: trimmed(1, 30),
+  firstName: trimmed(1, 100),
+  lastName: trimmed(1, 100),
+  documentType: z.enum(STUDENT_DOCUMENT_TYPES).default('TI'),
+  documentNumber: nullableText(30),
+  birthDate: isoDate.optional().nullable(),
+  sex: z.enum(['M', 'F']).optional().nullable(),
+  groupId: uuid.optional().nullable(),
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .optional()
+    .nullable()
+    .transform((v) => (v ? v : null))
+    .refine((v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), 'Correo inválido'),
+  phone: nullableText(20),
+  mobile: nullableText(20),
+  address: nullableText(200),
+  transport: nullableText(100),
+});
+
+export const studentUpdateSchema = studentCreateSchema.partial().extend({
+  status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+  inactiveReason: nullableText(100),
+});
+
+const upperCode = (max: number) => trimmed(1, max).transform((v) => v.toUpperCase().replace(/\s+/g, '-'));
+export const sectionUpsertSchema = z.object({ code: upperCode(20), name: trimmed(1, 80), sortOrder: z.number().int().min(0).max(999).default(0) });
+export const gradeUpsertSchema = z.object({ sectionId: uuid, code: upperCode(30), name: trimmed(1, 80), sortOrder: z.number().int().min(0).max(999).default(0) });
+export const groupUpsertSchema = z.object({ gradeId: uuid, code: upperCode(30), name: trimmed(1, 80), active: z.boolean().default(true) });
 
 export const guardianLinkSchema = z.object({
   guardianPersonId: uuid.optional(),

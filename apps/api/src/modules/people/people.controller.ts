@@ -1,11 +1,23 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags } from '@nestjs/swagger';
-import { emergencyContactSchema, guardianLinkSchema, invitationCreateSchema, studentSearchSchema } from '@sgee/shared';
+import {
+  emergencyContactSchema,
+  gradeUpsertSchema,
+  groupUpsertSchema,
+  guardianLinkSchema,
+  invitationCreateSchema,
+  sectionUpsertSchema,
+  studentCreateSchema,
+  studentSearchSchema,
+  studentUpdateSchema,
+} from '@sgee/shared';
 import type { Response } from 'express';
 import { z } from 'zod';
 import { type AuthUser, CurrentUser, Meta, Perms, type RequestMeta } from '../../common/auth';
 import { notFound } from '../../common/errors';
 import { zp } from '../../common/zod.pipe';
+import { MAX_PHOTO_BYTES } from '../files/storage.service';
 import { PeopleService } from './people.service';
 
 const uuid = new ParseUUIDPipe({ version: '4' });
@@ -25,12 +37,41 @@ export class PeopleController {
     return this.people.detail(user, id, meta);
   }
 
+  @Post('students')
+  @Perms('people:write')
+  createStudent(@CurrentUser() user: AuthUser, @Body(zp(studentCreateSchema)) body: z.infer<typeof studentCreateSchema>, @Meta() meta: RequestMeta) {
+    return this.people.createStudent(user, body, meta);
+  }
+
+  @Patch('students/:id')
+  @Perms('people:write')
+  updateStudent(@CurrentUser() user: AuthUser, @Param('id', uuid) id: string, @Body(zp(studentUpdateSchema)) body: z.infer<typeof studentUpdateSchema>, @Meta() meta: RequestMeta) {
+    return this.people.updateStudent(user, id, body, meta);
+  }
+
   @Get('students/:id/photo')
   async photo(@CurrentUser() user: AuthUser, @Param('id', uuid) id: string, @Query('refresh') refresh: string, @Res() res: Response) {
-    const url = await this.people.photoUrl(user, id, refresh === '1');
-    if (!url) throw notFound('Foto');
-    res.setHeader('Cache-Control', 'private, max-age=3000');
-    res.redirect(302, url);
+    const r = await this.people.photo(user, id, refresh === '1');
+    if (!r) throw notFound('Foto');
+    if ('redirect' in r) {
+      res.setHeader('Cache-Control', 'private, max-age=3000');
+      return res.redirect(302, r.redirect);
+    }
+    res.setHeader('Content-Type', r.mimeType);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(r.data);
+  }
+
+  @Post('students/:id/photo')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_PHOTO_BYTES, files: 1 } }))
+  uploadPhoto(@CurrentUser() user: AuthUser, @Param('id', uuid) id: string, @UploadedFile() file: Express.Multer.File, @Meta() meta: RequestMeta) {
+    return this.people.uploadPhoto(user, id, file, meta);
+  }
+
+  @Delete('students/:id/photo')
+  removePhoto(@CurrentUser() user: AuthUser, @Param('id', uuid) id: string, @Meta() meta: RequestMeta) {
+    return this.people.removePhoto(user, id, meta);
   }
 
   @Get('students/:id/timeline')
@@ -82,8 +123,44 @@ export class PeopleController {
   }
 
   @Get('structure')
-  structure(@CurrentUser() user: AuthUser) {
-    return this.people.structure(user);
+  structure(@CurrentUser() user: AuthUser, @Query('all') all?: string) {
+    return this.people.structure(user, all === '1' || all === 'true');
+  }
+
+  @Post('structure/sections')
+  @Perms('people:write', 'admin:settings')
+  createSection(@CurrentUser() user: AuthUser, @Body(zp(sectionUpsertSchema)) body: z.infer<typeof sectionUpsertSchema>, @Meta() meta: RequestMeta) {
+    return this.people.createSection(user, body, meta);
+  }
+
+  @Patch('structure/sections/:id')
+  @Perms('people:write', 'admin:settings')
+  updateSection(@CurrentUser() user: AuthUser, @Param('id', uuid) id: string, @Body(zp(sectionUpsertSchema.partial())) body: Partial<z.infer<typeof sectionUpsertSchema>>, @Meta() meta: RequestMeta) {
+    return this.people.updateSection(user, id, body, meta);
+  }
+
+  @Post('structure/grades')
+  @Perms('people:write', 'admin:settings')
+  createGrade(@CurrentUser() user: AuthUser, @Body(zp(gradeUpsertSchema)) body: z.infer<typeof gradeUpsertSchema>, @Meta() meta: RequestMeta) {
+    return this.people.createGrade(user, body, meta);
+  }
+
+  @Patch('structure/grades/:id')
+  @Perms('people:write', 'admin:settings')
+  updateGrade(@CurrentUser() user: AuthUser, @Param('id', uuid) id: string, @Body(zp(gradeUpsertSchema.partial())) body: Partial<z.infer<typeof gradeUpsertSchema>>, @Meta() meta: RequestMeta) {
+    return this.people.updateGrade(user, id, body, meta);
+  }
+
+  @Post('structure/groups')
+  @Perms('people:write', 'admin:settings')
+  createGroup(@CurrentUser() user: AuthUser, @Body(zp(groupUpsertSchema)) body: z.infer<typeof groupUpsertSchema>, @Meta() meta: RequestMeta) {
+    return this.people.createGroup(user, body, meta);
+  }
+
+  @Patch('structure/groups/:id')
+  @Perms('people:write', 'admin:settings')
+  updateGroup(@CurrentUser() user: AuthUser, @Param('id', uuid) id: string, @Body(zp(groupUpsertSchema.partial())) body: Partial<z.infer<typeof groupUpsertSchema>>, @Meta() meta: RequestMeta) {
+    return this.people.updateGroup(user, id, body, meta);
   }
 
   @Get('teacher/class')

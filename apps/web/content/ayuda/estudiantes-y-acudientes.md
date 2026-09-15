@@ -44,6 +44,49 @@ El **encabezado** muestra foto, código, sección, grupo, edad, grupo sanguíneo
 | **Consentimientos** | Estado de cada consentimiento: *Firmado*, *Pendiente* o *Revocado*. | Roles clínicos |
 | **Salud mental** | Notas cifradas con nivel de riesgo. | Psicología y médico |
 
+## Crear, editar e importar estudiantes
+
+Administración y coordinación de enfermería pueden gestionar el maestro de estudiantes. En modalidad **independiente** todo se hace aquí; en modalidad **con Phidias** los estudiantes vinculados tienen sus datos académicos en solo lectura. Vea [Modalidades de datos](/ayuda/modalidades-de-datos).
+
+### Nuevo estudiante
+
+1. En **Estudiantes**, pulse **Nuevo estudiante**.
+2. Complete **Código del estudiante** (único), **Grupo**, **Nombres**, **Apellidos**, **Tipo de documento** (registro civil, tarjeta de identidad, cédula de ciudadanía, cédula de extranjería, pasaporte, PPT…), **Número de documento**, **Fecha de nacimiento**, **Sexo** y, si los tiene, correo, celular, teléfono, transporte y dirección.
+3. Pulse **Guardar**. Se abre la ficha del estudiante para completar foto, acudientes y contactos.
+
+### Importar varios estudiantes (CSV)
+
+1. Pulse **Importar CSV**.
+2. Cargue el archivo o pegue el contenido. La primera fila debe ser `codigo;documento;nombres;apellidos;fecha_nacimiento;sexo;grupo`, con fecha AAAA-MM-DD, sexo M o F y el código del grupo.
+3. Pulse **Importar**. Si un código ya existe, el estudiante se actualiza. Las filas con error (por ejemplo, un grupo inexistente) se listan con su número de línea.
+
+### Editar datos o retirar a un estudiante
+
+1. En la ficha del estudiante, pulse **Editar datos**.
+2. Modifique los datos. Para un estudiante que se retira, cambie **Estado** a *Retirado / inactivo*: conserva su historia clínica y deja de aparecer en listas y clases.
+3. Pulse **Guardar**.
+
+## Foto del estudiante
+
+La foto identifica al estudiante en **todos los paneles**: tablero de enfermería, atenciones, medicación, *Mi clase* de los docentes, portería, portal de familias, búsqueda y emergencias.
+
+1. En la ficha del estudiante, pulse **Foto**.
+2. Pulse **Tomar foto** (cámara del celular o tablet) o **Elegir archivo** (JPG, PNG o WEBP de hasta 5 MB). Las fotos grandes se reducen automáticamente.
+3. Revise la vista previa y pulse **Guardar foto**. Para eliminarla, **Quitar foto**.
+
+> **Consejo:** use fotos de frente, recientes y con buena luz. La foto se guarda cifrada y solo la ven las personas autorizadas a ver al estudiante (por ejemplo, un docente ve las de sus grupos y una familia solo las de sus hijos).
+
+## Estructura académica (modalidad independiente)
+
+En **Administración → Estructura académica**:
+
+1. **Nueva sección:** código corto (por ejemplo, PRI), nombre y orden.
+2. En la sección, **Grado:** código, nombre y orden.
+3. En el grado, **Grupo:** código único (por ejemplo, 6A) y nombre.
+4. Toque un grupo para editarlo o desactivarlo. Un grupo con estudiantes activos no se puede desactivar: primero muévalos a otro grupo.
+
+En modalidad con Phidias la estructura se muestra en solo lectura.
+
 ## Acudientes
 
 En **Resumen → Acudientes** verá cada acudiente con su parentesco, si es **Principal**, si **Puede recoger** o **No recoge**, y una alerta **Restricción judicial** cuando existe.
@@ -55,6 +98,13 @@ En **Resumen → Acudientes** verá cada acudiente con su parentesco, si es **Pr
 1. Pulse **Vincular**.
 2. Complete **Nombres**, **Apellidos**, **Documento**, **Parentesco**, **Correo** y **Celular**, e indique si puede recoger.
 3. Pulse **Vincular**.
+
+### Editar o desvincular un acudiente
+
+Debajo de cada acudiente:
+
+- **Editar:** cambie el parentesco y marque si es **acudiente principal**, si **puede recoger**, si **tiene custodia legal** o si tiene una **restricción judicial** (en ese caso nunca podrá recoger). Agregue restricciones u observaciones visibles para enfermería, portería y administración.
+- **Desvincular:** retira el vínculo con el estudiante sin borrar el historial.
 
 ### Enviar una invitación para crear la cuenta
 
@@ -73,7 +123,7 @@ El código es de un solo uso y tiene vencimiento.
 2. Complete **Nombre**, **Parentesco**, **Teléfono** y **Documento**, e indique si está autorizado para recoger.
 3. Pulse **Guardar**.
 
-Los contactos que agregan las familias aparecen como **Por verificar** hasta que enfermería los confirma.
+Los contactos que agregan las familias aparecen como **Por verificar**. Pulse el icono de verificación para confirmarlos o el de quitar para retirar un contacto que ya no aplica.
 
 ## Estudiantes retirados
 

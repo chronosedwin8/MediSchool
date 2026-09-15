@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 import { fmtDateTime } from '@/lib/format';
 
 interface Status {
+  dataSource: 'PHIDIAS' | 'LOCAL';
   enabled: boolean;
   mock: boolean;
   photosEnabled: boolean;
@@ -45,6 +46,11 @@ export function IntegrationsPanel() {
   if (!s) return <Skeleton className="h-96" />;
   return (
     <div className="flex flex-col gap-4">
+      {s.dataSource === 'LOCAL' && (
+        <Alert tone="info" title="El colegio trabaja de forma independiente de Phidias">
+          Estudiantes, estructura académica, fotos, acudientes y contactos se administran dentro de MediSchool y las sincronizaciones están detenidas. Para volver a sincronizar, elija la modalidad «Con Phidias» en Configuración.
+        </Alert>
+      )}
       {s.mock && <Alert tone="warning">Modo simulado: se usan datos de prueba (sin token de Phidias configurado).</Alert>}
       {s.relativesPermission?.denied && (
         <Alert tone="danger" title="Phidias no autoriza la consulta de acudientes y contactos">
@@ -62,14 +68,14 @@ export function IntegrationsPanel() {
         <CardHeader>
           <CardTitle>Sincronización con Phidias</CardTitle>
           <div className="w-72">
-            <Toggle label="Sincronización automática" checked={s.enabled} onChange={(v) => toggle.mutate(v)} />
+            <Toggle label="Sincronización automática" checked={s.enabled} onChange={(v) => toggle.mutate(v)} disabled={s.dataSource === 'LOCAL'} />
           </div>
         </CardHeader>
         <CardContent>
           <p className="mb-3 text-sm text-muted">Idempotente: cada registro se identifica por su ID de Phidias y un hash de contenido; una segunda ejecución sin cambios no escribe nada. Nunca se sobrescriben datos clínicos locales.</p>
           <div className="flex flex-wrap gap-2">
             {(['INCREMENTAL', 'FULL', 'RELATIVES', 'PHOTOS', 'HISTORY'] as const).map((k) => (
-              <Button key={k} variant={k === 'FULL' ? 'primary' : 'outline'} onClick={() => sync.mutate(k)} loading={sync.isPending && sync.variables === k} disabled={sync.isPending}>
+              <Button key={k} variant={k === 'FULL' ? 'primary' : 'outline'} onClick={() => sync.mutate(k)} loading={sync.isPending && sync.variables === k} disabled={sync.isPending || s.dataSource === 'LOCAL'}>
                 <RefreshCw className="h-4 w-4" /> {KIND[k]}
               </Button>
             ))}

@@ -251,7 +251,7 @@ async function seedTenantBase(slug: string, name: string, domain: string, settin
 
 // ── demo tenant with synthetic data ────────────────────────────────────────
 async function seedDemoTenant() {
-  const base = await seedTenantBase('colegio-demo', 'Colegio Demo MediSchool', 'colegio-demo.test', { mfaEnforced: false, enabledChannels: ['IN_APP', 'EMAIL'] });
+  const base = await seedTenantBase('colegio-demo', 'Colegio Demo MediSchool', 'colegio-demo.test', { dataSource: 'LOCAL', mfaEnforced: false, enabledChannels: ['IN_APP', 'EMAIL'] });
   if (!base.created) return;
   const tenantId = base.tenant.id;
   const U = base.users!;
@@ -715,6 +715,7 @@ async function seedDemoTenant() {
 // ── real tenant: base + demo links after the Phidias sync ──────────────────
 async function seedRealTenant() {
   await seedTenantBase('colegio-aleman', 'Colegio Alemán de Barranquilla', 'colegio-aleman.test', {
+    dataSource: 'PHIDIAS',
     mfaEnforced: false,
     enabledChannels: ['IN_APP', 'EMAIL'],
     passTransitAlertMinutes: 10,
@@ -732,7 +733,20 @@ async function seedRealTenant() {
  *   SCHOOL_EMAIL_DOMAIN, SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, SEED_ADMIN_FIRST_NAME, SEED_ADMIN_LAST_NAME
  * Idempotent: creates the user once; an existing user keeps its current password.
  */
+/** Sets the data mode of the seeded schools when missing: the real school uses Phidias, the demo works independently. */
+async function ensureDataSources() {
+  for (const [slug, dataSource] of [['colegio-aleman', 'PHIDIAS'], ['colegio-demo', 'LOCAL']] as const) {
+    const t = await prisma.tenant.findUnique({ where: { slug } });
+    if (!t) continue;
+    const settings = (t.settings as Record<string, unknown>) ?? {};
+    if (settings.dataSource) continue;
+    await prisma.tenant.update({ where: { id: t.id }, data: { settings: { ...settings, dataSource } as Prisma.InputJsonValue } });
+    console.log(`  ✓ modalidad de datos ${slug}: ${dataSource}`);
+  }
+}
+
 async function seedRealAdmin() {
+  await ensureDataSources();
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { slug: 'colegio-aleman' } });
   const domain = process.env.SCHOOL_EMAIL_DOMAIN?.trim().toLowerCase();
   if (domain) {

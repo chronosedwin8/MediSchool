@@ -8,7 +8,9 @@ order: 3
 updated: 2026-09-15
 ---
 
-**Phidias** es la plataforma académica del colegio. MediSchool la usa como **fuente del maestro de estudiantes**, pero guarda su propia copia, de modo que la enfermería funciona aunque Phidias no esté disponible.
+**Phidias** es la plataforma académica del colegio. En la modalidad **Con Phidias**, MediSchool la usa como **fuente del maestro de estudiantes**, pero guarda su propia copia, de modo que la enfermería funciona aunque Phidias no esté disponible.
+
+> **Nota:** si el colegio no usa Phidias, elija la modalidad **Independiente** en *Administración → Configuración*: todo se administra dentro de MediSchool y el panel de Phidias queda inactivo. Vea [Modalidades de datos](/ayuda/modalidades-de-datos).
 
 ## Qué se sincroniza
 

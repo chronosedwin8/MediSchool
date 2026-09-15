@@ -2,11 +2,14 @@
 
 import { Badge, Button, Card, Checkbox, EmptyState, Input, PageHeader, Select, Skeleton, StudentAvatar } from '@sgee/ui';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { Search, Users } from 'lucide-react';
+import { FileUp, Search, UserPlus, Users } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { StudentFormDialog, StudentImportDialog } from '@/components/student-form';
 import { type StudentRow, useDebounced } from '@/components/student-picker';
 import { api } from '@/lib/api';
+import { can, useMe } from '@/lib/session';
 
 export interface Structure {
   id: string;
@@ -16,6 +19,10 @@ export interface Structure {
 }
 
 export default function StudentsPage() {
+  const router = useRouter();
+  const { data: me } = useMe();
+  const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [q, setQ] = useState('');
   const [sectionId, setSectionId] = useState('');
   const [gradeId, setGradeId] = useState('');
@@ -36,7 +43,24 @@ export default function StudentsPage() {
 
   return (
     <div>
-      <PageHeader title="Estudiantes" description="Maestro sincronizado con Phidias. Las alertas médicas se muestran siempre." />
+      <PageHeader
+        title="Estudiantes"
+        description={me?.settings.dataSource === 'PHIDIAS' ? 'Maestro sincronizado con Phidias. Las alertas médicas se muestran siempre.' : 'Estudiantes administrados en MediSchool. Las alertas médicas se muestran siempre.'}
+        actions={
+          can(me, 'people:write') && (
+            <>
+              <Button variant="outline" onClick={() => setImporting(true)}>
+                <FileUp className="h-4 w-4" /> Importar CSV
+              </Button>
+              <Button onClick={() => setCreating(true)}>
+                <UserPlus className="h-4 w-4" /> Nuevo estudiante
+              </Button>
+            </>
+          )
+        }
+      />
+      {creating && <StudentFormDialog onClose={() => setCreating(false)} onSaved={(id) => router.push(`/estudiantes/${id}`)} />}
+      {importing && <StudentImportDialog onClose={() => setImporting(false)} />}
       <Card className="mb-4 grid gap-3 p-4 md:grid-cols-[1fr_repeat(3,180px)_auto_auto]">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />

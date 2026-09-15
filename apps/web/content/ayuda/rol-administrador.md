@@ -18,7 +18,8 @@ El administrador mantiene MediSchool funcionando para todo el colegio. **No acce
 |---|---|---|
 | **Usuarios** | Crear cuentas, asignar roles y grupos, restablecer contraseñas, desbloquear, restablecer MFA, PIN de kiosco. | [Usuarios, roles y permisos](/ayuda/usuarios-y-permisos) |
 | **Roles y permisos** | Ajustar qué puede hacer cada rol en su colegio. | [Usuarios, roles y permisos](/ayuda/usuarios-y-permisos) |
-| **Configuración** | Nombre, zona horaria, MFA obligatorio, sesiones, tiempos de alerta, medicación, brotes y canales. | [Configuración del colegio](/ayuda/configuracion-del-colegio) |
+| **Configuración** | Modalidad de datos (con Phidias o independiente), nombre, zona horaria, MFA obligatorio, sesiones, tiempos de alerta, medicación, brotes y canales. | [Configuración del colegio](/ayuda/configuracion-del-colegio) |
+| **Estructura académica** | Secciones, grados y grupos (modalidad independiente). | [Estudiantes, acudientes e invitaciones](/ayuda/estudiantes-y-acudientes#estructura-academica-modalidad-independiente) |
 | **Phidias** | Estado de la sincronización, ejecuciones manuales, conflictos y propiedad de campos. | [Integración con Phidias](/ayuda/integracion-phidias) |
 | **Cumplimiento legal** | Matriz legal, consentimientos, ARCO, reportes obligatorios, retención y accesos. | [Cumplimiento legal y auditoría](/ayuda/cumplimiento-legal-y-auditoria) |
 | **Auditoría** | Búsqueda de acciones y verificación de la cadena de hash. | [Cumplimiento legal y auditoría](/ayuda/cumplimiento-legal-y-auditoria) |
@@ -29,8 +30,10 @@ Además puede consultar **Estudiantes** (sin información clínica), **Inventari
 
 ## Puesta en marcha del colegio (lista de verificación)
 
-1. **Configuración:** confirme el nombre del colegio y la zona horaria (*America/Bogota*), active **MFA obligatorio para roles clínicos y administrativos** y habilite los canales de comunicación disponibles.
-2. **Phidias:** active la **Sincronización automática** y ejecute una sincronización **Completa**, luego **Fotos** e **Historial de encuestas**. Resuelva los conflictos.
+1. **Configuración:** elija la [modalidad de datos](/ayuda/modalidades-de-datos), confirme el nombre del colegio y la zona horaria (*America/Bogota*), active **MFA obligatorio para roles clínicos y administrativos** y habilite los canales de comunicación disponibles.
+2. **Datos de estudiantes:**
+   - *Con Phidias:* active la **Sincronización automática** y ejecute una sincronización **Completa**, luego **Fotos**, **Acudientes y contactos** e **Historial de encuestas**. Resuelva los conflictos.
+   - *Independiente:* cree la **Estructura académica**, cargue los estudiantes con **Importar CSV** o **Nuevo estudiante** y suba sus fotos.
 3. **Usuarios:** cree las cuentas de enfermería, médico, coordinación, psicología, directivos y portería con **correos institucionales**. Asigne a cada docente sus **grupos**.
 4. **Portería:** cree el usuario de portería con **PIN de kiosco** y entregue el código del dispositivo al personal.
 5. **Cumplimiento legal:** verifique que el perfil activo sea **Colombia** y revise los textos y versiones de los **consentimientos**.

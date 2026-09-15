@@ -6,6 +6,7 @@ import { KeyRound, MonitorSmartphone, ShieldCheck, Stethoscope } from 'lucide-re
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
+import { ClientOnly, FormPageFallback } from '@/components/client-only';
 import { api, ApiError, errorMessage } from '@/lib/api';
 import { useI18n } from '@/lib/i18n';
 
@@ -193,8 +194,10 @@ function LoginInner() {
 
 export default function LoginPage() {
   return (
-    <Suspense>
-      <LoginInner />
-    </Suspense>
+    <ClientOnly fallback={<FormPageFallback />}>
+      <Suspense fallback={<FormPageFallback />}>
+        <LoginInner />
+      </Suspense>
+    </ClientOnly>
   );
 }

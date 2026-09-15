@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Card, CardContent, CardHeader, CardTitle, Field, Input, Skeleton, Toggle } from '@sgee/ui';
+import { Alert, Button, Card, CardContent, CardHeader, CardTitle, cn, Field, Input, Skeleton, Toggle } from '@sgee/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -9,6 +9,7 @@ import { api } from '@/lib/api';
 interface Settings {
   tenant: { name: string; timezone: string; slug: string; country: string };
   settings: {
+    dataSource: 'PHIDIAS' | 'LOCAL';
     mfaEnforced: boolean;
     passTransitAlertMinutes: number;
     passExpireMinutes: number;
@@ -49,8 +50,38 @@ export function SettingsPanel() {
       <Input type="number" value={String(s[key] as number)} onChange={(e) => setV({ ...v, settings: { ...s, [key]: Number(e.target.value) } })} />
     </Field>
   );
+  const MODES = [
+    { key: 'PHIDIAS', title: 'Con Phidias', text: 'Estudiantes, grados, grupos y fotos se sincronizan automáticamente desde Phidias. Los datos académicos de los estudiantes vinculados se corrigen en Phidias.' },
+    { key: 'LOCAL', title: 'Independiente de Phidias', text: 'Todo se administra dentro de MediSchool: estructura académica, estudiantes, fotos, acudientes y contactos. Las sincronizaciones con Phidias se detienen.' },
+  ] as const;
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle>Modalidad de datos</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2">
+          {MODES.map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              aria-pressed={s.dataSource === m.key}
+              onClick={() => setV({ ...v, settings: { ...s, dataSource: m.key } })}
+              className={cn('rounded-2xl border p-4 text-left transition-colors', s.dataSource === m.key ? 'border-primary-700 bg-primary-50 ring-1 ring-primary-700 dark:bg-primary-950' : 'border-border hover:bg-card-muted')}
+            >
+              <span className="block font-semibold">{m.title}</span>
+              <span className="mt-1 block text-sm text-muted">{m.text}</span>
+            </button>
+          ))}
+          {q.data && q.data.settings.dataSource !== s.dataSource && (
+            <Alert tone="warning" className="md:col-span-2">
+              {s.dataSource === 'LOCAL'
+                ? 'Al guardar, el colegio pasará a trabajar de forma independiente: se detienen las sincronizaciones con Phidias y los datos ya importados se conservan y podrán editarse en MediSchool.'
+                : 'Al guardar, se activará la sincronización con Phidias: los estudiantes vinculados tendrán sus datos académicos en solo lectura y se actualizarán desde Phidias.'}
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
           <CardTitle>Colegio</CardTitle>

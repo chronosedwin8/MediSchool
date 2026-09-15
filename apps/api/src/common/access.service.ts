@@ -53,6 +53,8 @@ export class AccessService {
       } else if (hasRole(user, 'GATE')) allowed = true;
       else if (hasRole(user, 'TEACHER')) allowed = !!student.currentGroupId && (await this.teacherGroupIds(tx, user)).includes(student.currentGroupId);
       if (!allowed && hasRole(user, 'PARENT')) allowed = (await this.childrenIds(tx, user)).includes(studentId);
+      // A student account sees its own identification (e.g. its photo on "Mi pase").
+      if (!allowed && hasRole(user, 'STUDENT')) allowed = !!user.personId && user.personId === student.personId;
     }
     if (!allowed) throw forbidden('No tiene acceso a la información de este estudiante.');
 

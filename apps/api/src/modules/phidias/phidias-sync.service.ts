@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import type { Tx } from '@sgee/db';
+import { dataSourceOf } from '@sgee/shared';
 import { AuditService } from '../../common/audit.service';
+import { conflict } from '../../common/errors';
 import { PrismaService } from '../../common/prisma.service';
 import { config } from '../../config';
 import { PhotoService } from '../files/storage.service';
@@ -99,8 +101,16 @@ export class PhidiasSyncService implements OnModuleInit {
   }
 
   async enabled(tenantId: string) {
-    const s = await this.prisma.forTenant(tenantId, (tx) => tx.integrationSetting.findUnique({ where: { tenantId_provider: { tenantId, provider: 'PHIDIAS' } } }));
-    return !!s?.enabled;
+    return this.prisma.forTenant(tenantId, async (tx) => {
+      const [s, t] = await Promise.all([tx.integrationSetting.findUnique({ where: { tenantId_provider: { tenantId, provider: 'PHIDIAS' } } }), tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } })]);
+      return !!s?.enabled && dataSourceOf(t?.settings) === 'PHIDIAS';
+    });
+  }
+
+  /** Throws when the school works independently of Phidias (manual syncs are refused). */
+  async assertPhidiasMode(tenantId: string) {
+    const t = await this.prisma.forTenant(tenantId, (tx) => tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } }));
+    if (dataSourceOf(t?.settings) !== 'PHIDIAS') throw conflict('DATA_SOURCE_LOCAL', 'El colegio trabaja en modalidad independiente de Phidias. Cambie la modalidad en Administración → Configuración para sincronizar.');
   }
 
   private async startRun(tenantId: string, kind: SyncKind, userId?: string | null) {
@@ -350,6 +360,11 @@ export class PhidiasSyncService implements OnModuleInit {
       const worker = async () => {
         while (queue.length) {
           const s = queue.shift()!;
+          // Photos uploaded in MediSchool take precedence over the Phidias bucket.
+          if (s.person.photoKey?.startsWith('local:')) {
+            c.skipped++;
+            continue;
+          }
           try {
             const found = await this.photos.find(s.code);
             if ((found?.key ?? null) === s.person.photoKey && (found?.etag ?? null) === s.person.photoHash) {
@@ -697,7 +712,9 @@ export class PhidiasSyncService implements OnModuleInit {
         tx.syncRun.findFirst({ where: { kind: 'RELATIVES', status: { not: 'RUNNING' } }, orderBy: { startedAt: 'desc' } }),
       ]);
       const rd = (lastRelatives?.details ?? {}) as { reason?: string; module?: string };
+      const tenant = await tx.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
       return {
+        dataSource: dataSourceOf(tenant?.settings),
         enabled: !!setting?.enabled,
         mock: this.client.mock,
         photosEnabled: this.photos.enabled,

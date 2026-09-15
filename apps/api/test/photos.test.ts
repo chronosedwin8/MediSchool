@@ -13,7 +13,9 @@ describe('student photos (privacy)', () => {
   it('exposes a photo URL only for photos linked by the Phidias sync', () => {
     expect(studentSummary(student(null), { photosEnabled: true }).photoUrl).toBeNull();
     expect(studentSummary(student('8888.jpg'), { photosEnabled: false }).photoUrl).toBeNull();
-    expect(studentSummary(student('8888.jpg'), { photosEnabled: true }).photoUrl).toBe('/api/v1/students/11111111-1111-4111-8111-111111111111/photo');
+    expect(studentSummary(student('8888.jpg'), { photosEnabled: true }).photoUrl).toMatch(/^\/api\/v1\/students\/11111111-1111-4111-8111-111111111111\/photo\?v=\w+$/);
+    // Photos uploaded in MediSchool do not depend on the S3 bucket.
+    expect(studentSummary(student('local:abc'), { photosEnabled: false }).photoUrl).toMatch(/\/photo\?v=/);
   });
 
   it('never probes the bucket by student code', async () => {

@@ -8,6 +8,7 @@ import { IntegrationsPanel } from '@/components/admin/integrations';
 import { NotificationsPanel } from '@/components/admin/notifications';
 import { RolesPanel } from '@/components/admin/roles';
 import { SettingsPanel } from '@/components/admin/settings';
+import { StructurePanel } from '@/components/admin/structure';
 import { SystemPanel } from '@/components/admin/system';
 import { TenantsPanel } from '@/components/admin/tenants';
 import { UsersPanel } from '@/components/admin/users';
@@ -20,6 +21,7 @@ export default function AdminPage() {
     { value: 'usuarios', label: 'Usuarios', hidden: !can(me, 'admin:users') },
     { value: 'roles', label: 'Roles y permisos', hidden: !can(me, 'admin:users') },
     { value: 'configuracion', label: 'Configuración', hidden: !can(me, 'admin:settings') },
+    { value: 'estructura', label: 'Estructura académica', hidden: !can(me, 'people:write', 'admin:settings') },
     { value: 'integraciones', label: 'Phidias', hidden: !can(me, 'admin:integrations') },
     { value: 'cumplimiento', label: 'Cumplimiento legal', hidden: !can(me, 'compliance:manage') },
     { value: 'auditoria', label: 'Auditoría', hidden: !can(me, 'audit:read') },
@@ -37,6 +39,7 @@ export default function AdminPage() {
         <TabPanel value="usuarios">{current === 'usuarios' && <UsersPanel />}</TabPanel>
         <TabPanel value="roles">{current === 'roles' && <RolesPanel />}</TabPanel>
         <TabPanel value="configuracion">{current === 'configuracion' && <SettingsPanel />}</TabPanel>
+        <TabPanel value="estructura">{current === 'estructura' && <StructurePanel />}</TabPanel>
         <TabPanel value="integraciones">{current === 'integraciones' && <IntegrationsPanel />}</TabPanel>
         <TabPanel value="cumplimiento">{current === 'cumplimiento' && <CompliancePanel />}</TabPanel>
         <TabPanel value="auditoria">{current === 'auditoria' && <AuditPanel />}</TabPanel>

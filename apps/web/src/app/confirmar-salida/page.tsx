@@ -6,6 +6,7 @@ import { CheckCircle2, ShieldCheck } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { type ExitConfirmBody, ExitConfirmForm, type PickupOption } from '@/components/exit-confirm-form';
+import { ClientOnly, FormPageFallback } from '@/components/client-only';
 import { api, errorMessage } from '@/lib/api';
 
 interface PublicExit {
@@ -75,8 +76,10 @@ function Inner() {
 
 export default function PublicExitConfirmPage() {
   return (
-    <Suspense>
-      <Inner />
-    </Suspense>
+    <ClientOnly fallback={<FormPageFallback />}>
+      <Suspense fallback={<FormPageFallback />}>
+        <Inner />
+      </Suspense>
+    </ClientOnly>
   );
 }

@@ -4,7 +4,7 @@ import { ENCOUNTER_TEMPLATES, ENCOUNTER_TYPE_LABELS, type EncounterType } from '
 import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle, Field, Input, KanbanColumn, PageHeader, Select, Skeleton, StatCard, StudentAvatar } from '@sgee/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Html5Qrcode } from 'html5-qrcode';
-import { Activity, AlertTriangle, Boxes, ClipboardPlus, Clock, Pill, QrCode, Radio, Users } from 'lucide-react';
+import { Activity, AlertTriangle, Boxes, ClipboardPlus, Clock, Pill, Plus, QrCode, Radio, Users } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
@@ -248,6 +248,16 @@ function NewEncounterDialog({ open, onOpenChange }: { open: boolean; onOpenChang
   const [student, setStudent] = useState<StudentRow | null>(null);
   const [staffQ, setStaffQ] = useState('');
   const [staffId, setStaffId] = useState<string | null>(null);
+  const [newStaff, setNewStaff] = useState<{ firstName: string; lastName: string; documentNumber: string; position: string } | null>(null);
+  const createStaff = useMutation({
+    mutationFn: () => api<{ id: string; firstName: string; lastName: string }>('/staff', { body: { ...newStaff!, position: newStaff!.position || null } }),
+    onSuccess: (p) => {
+      toast.success(`${p.firstName} ${p.lastName} registrado(a) como personal del colegio`);
+      setStaffId(p.id);
+      setStaffQ(`${p.firstName} ${p.lastName}`);
+      setNewStaff(null);
+    },
+  });
   const [template, setTemplate] = useState('');
   const [type, setType] = useState<EncounterType>('ILLNESS');
   const [complaint, setComplaint] = useState('');
@@ -316,6 +326,26 @@ function NewEncounterDialog({ open, onOpenChange }: { open: boolean; onOpenChang
                 </button>
               ))}
             </div>
+            {!newStaff ? (
+              <Button size="sm" variant="ghost" className="mt-1 self-start" onClick={() => setNewStaff({ firstName: '', lastName: '', documentNumber: '', position: '' })}>
+                <Plus className="h-4 w-4" /> Registrar persona del personal
+              </Button>
+            ) : (
+              <div className="mt-2 grid gap-2 rounded-xl border border-border p-3 sm:grid-cols-2">
+                <Input placeholder="Nombres" aria-label="Nombres del personal" value={newStaff.firstName} onChange={(e) => setNewStaff({ ...newStaff, firstName: e.target.value })} />
+                <Input placeholder="Apellidos" aria-label="Apellidos del personal" value={newStaff.lastName} onChange={(e) => setNewStaff({ ...newStaff, lastName: e.target.value })} />
+                <Input placeholder="Documento" aria-label="Documento del personal" inputMode="numeric" value={newStaff.documentNumber} onChange={(e) => setNewStaff({ ...newStaff, documentNumber: e.target.value })} />
+                <Input placeholder="Cargo (opcional)" aria-label="Cargo" value={newStaff.position} onChange={(e) => setNewStaff({ ...newStaff, position: e.target.value })} />
+                <div className="flex justify-end gap-2 sm:col-span-2">
+                  <Button size="sm" variant="ghost" onClick={() => setNewStaff(null)}>
+                    Cancelar
+                  </Button>
+                  <Button size="sm" onClick={() => createStaff.mutate()} loading={createStaff.isPending} disabled={!newStaff.firstName.trim() || !newStaff.lastName.trim() || newStaff.documentNumber.trim().length < 3}>
+                    Registrar
+                  </Button>
+                </div>
+              </div>
+            )}
           </Field>
         )}
         {subject === 'STUDENT' && (
