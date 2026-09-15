@@ -58,8 +58,25 @@ export class StatsService implements OnModuleInit {
     return parts.length ? Prisma.sql`AND ${Prisma.join(parts, ' AND ')}` : Prisma.empty;
   }
 
+  /** Short-lived cache: dashboards read aggregates (reporting views refresh every 15 min). */
+  private readonly dashboardCache = new Map<string, { at: number; value: unknown }>();
+
   async dashboard(user: AuthUser, q: Query) {
     if (!can(user, 'stats:clinical', 'stats:anonymous')) throw forbidden();
+    const ttlMs = Number(process.env.STATS_CACHE_SECONDS ?? 60) * 1000;
+    if (ttlMs <= 0) return this.computeDashboard(user, q);
+    const clinical = can(user, 'stats:clinical');
+    const scoped = hasRole(user, 'DIRECTOR') && !clinical ? [...user.sectionScopes].sort().join(',') : '';
+    const key = JSON.stringify([user.tenantId, clinical, hasRole(user, 'DIRECTOR'), scoped, q]);
+    const hit = this.dashboardCache.get(key);
+    if (hit && Date.now() - hit.at < ttlMs) return hit.value as Awaited<ReturnType<StatsService['computeDashboard']>>;
+    const value = await this.computeDashboard(user, q);
+    if (this.dashboardCache.size > 500) this.dashboardCache.clear();
+    this.dashboardCache.set(key, { at: Date.now(), value });
+    return value;
+  }
+
+  private async computeDashboard(user: AuthUser, q: Query) {
     return this.prisma.forUser(user, async (tx) => {
       const { tz, from, to, start, end } = await this.range(tx, user.tenantId, q);
       const scope = this.studentScope(user, q);

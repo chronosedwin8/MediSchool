@@ -11,6 +11,7 @@ process.env.DEV_EXPOSE_OTP = 'true';
 process.env.PHIDIAS_MOCK = 'true';
 process.env.AUTH_RATE_LIMIT = '100000';
 process.env.API_RATE_LIMIT = '100000';
+process.env.STATS_CACHE_SECONDS = '0';
 process.env.TZ = 'America/Bogota';
 process.env.STORAGE_LOCAL_DIR = path.join(os.tmpdir(), 'sgee-test-storage');
 process.env.PUBLIC_WEB_URL = 'http://localhost:3100';

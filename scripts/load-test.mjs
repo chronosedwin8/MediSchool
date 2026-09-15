@@ -53,7 +53,7 @@ async function vu(i) {
     else if (roll < 0.97) await timed(`${BASE}/stats/dashboard`, { headers: { Authorization: `Bearer ${director}` } });
     else {
       passes++;
-      await timed(`${BASE}/passes`, { method: 'POST', headers: { Authorization: `Bearer ${teacher}`, 'Content-Type': 'application/json', 'Idempotency-Key': `load-${i}-${Date.now()}-${Math.random()}` }, body: JSON.stringify({ studentId: students[Math.floor(Math.random() * students.length)], reason: 'Prueba de carga', urgency: 'LOW' }) });
+      await timed(`${BASE}/passes`, { method: 'POST', headers: { Authorization: `Bearer ${teacher}`, 'Content-Type': 'application/json', 'Idempotency-Key': `load-${i}-${Date.now()}-${Math.random().toString(36).slice(2)}` }, body: JSON.stringify({ studentId: students[Math.floor(Math.random() * students.length)], reason: 'Prueba de carga', urgency: 'LOW' }) });
     }
     await new Promise((r) => setTimeout(r, 500 + Math.random() * 1500));
   }
