@@ -1,0 +1,33 @@
+{
+  "name": "@sgee/db",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "generate": "dotenv -e ../../.env -- prisma generate",
+    "setup": "dotenv -e ../../.env -- tsx scripts/setup.ts",
+    "migrate": "dotenv -e ../../.env -- tsx scripts/migrate.ts",
+    "seed": "dotenv -e ../../.env -- tsx scripts/seed.ts",
+    "reset": "dotenv -e ../../.env -- tsx scripts/setup.ts --reset",
+    "migration:diff": "dotenv -e ../../.env -- prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "@sgee/shared": "1.0.0"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "9.9.0",
+    "@types/node": "^22.15.0",
+    "@types/pg": "^8.15.0",
+    "dotenv-cli": "^8.0.0",
+    "pg": "^8.16.0",
+    "prisma": "6.19.3",
+    "tsx": "^4.20.0"
+  }
+}

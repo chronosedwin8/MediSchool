@@ -1,0 +1,24 @@
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json packages/shared/
+COPY packages/ui/package.json packages/ui/
+COPY packages/db/package.json packages/db/
+COPY apps/web/package.json apps/web/
+COPY apps/api/package.json apps/api/
+RUN npm ci --workspace @sgee/shared --workspace @sgee/ui --workspace @sgee/web --include-workspace-root
+COPY tsconfig.base.json ./
+COPY packages/shared packages/shared
+COPY packages/ui packages/ui
+COPY apps/web apps/web
+ARG NEXT_PUBLIC_API_WS_URL=http://localhost:4000
+ENV NEXT_PUBLIC_API_WS_URL=$NEXT_PUBLIC_API_WS_URL
+RUN npm run build -w @sgee/shared && cd apps/web && npx next build
+
+FROM node:22-alpine
+ENV NODE_ENV=production TZ=America/Bogota
+WORKDIR /app
+COPY --from=build /app /app
+USER node
+EXPOSE 3100
+CMD ["npx", "--prefix", "apps/web", "next", "start", "apps/web", "-p", "3100"]

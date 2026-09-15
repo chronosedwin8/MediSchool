@@ -1,0 +1,9 @@
+[
+  {
+    "poll_id": 113, "person_id": 80001, "person_document": 52000001, "person": "CAROLINA MEJÍA PARDO", "section": null, "status": null,
+    "timestamp": "2026-09-03 11:50:00", "author": "ENFERMERA DEMO",
+    "Hora y fecha de ingreso": "2026-09-03 11:44:00", "Sintomas": "Dolor de espalda\r\n", "Fecha y hora de la atención": "2026-09-03 11:45:00",
+    "Motivo de Atención": "Enfermedad general", "Motivo de Accidente": "--", "Diagnóstico": "Dolor de espalda",
+    "Descripción de la Atención": "<p>Colaboradora consulta por dolor de espalda. Egresa al puesto de trabajo.</p>", "Nombre del medicamento": "ACETAMINOFEN TB 500MG"
+  }
+]

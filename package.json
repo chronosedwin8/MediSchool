@@ -1,0 +1,43 @@
+{
+  "name": "medischool",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MediSchool — Sistema de Gestión de Enfermería Escolar (SGEE)",
+  "workspaces": [
+    "packages/shared",
+    "packages/db",
+    "packages/ui",
+    "apps/api",
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:packages": "npm run build -w @sgee/shared && npm run build -w @sgee/db",
+    "build": "npm run build:packages && npm run build -w @sgee/api && npm run build -w @sgee/web",
+    "dev": "npm run build:packages && concurrently -n api,web -c cyan,magenta \"npm run dev -w @sgee/api\" \"npm run dev -w @sgee/web\"",
+    "start": "concurrently -n api,web \"npm run start -w @sgee/api\" \"npm run start -w @sgee/web\"",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run build:packages && npm run test --workspaces --if-present",
+    "e2e": "playwright test -c e2e/playwright.config.ts",
+    "db:setup": "npm run setup -w @sgee/db",
+    "db:migrate": "npm run migrate -w @sgee/db",
+    "db:seed": "npm run seed -w @sgee/db",
+    "db:reset": "npm run reset -w @sgee/db",
+    "phidias:sync": "npm run phidias:sync -w @sgee/api",
+    "load": "node scripts/load-test.mjs",
+    "storybook": "npm run storybook -w @sgee/ui"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@playwright/test": "1.63.0",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.39.0",
+    "globals": "^16.5.0",
+    "prettier": "^3.6.2",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.46.0"
+  }
+}

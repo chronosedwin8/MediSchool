@@ -1,0 +1,7 @@
+{$SGEE_DOMAIN:enfermeria.localhost} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	@api path /api/* /socket.io/*
+	reverse_proxy @api api:4000
+	reverse_proxy web:3100
+}

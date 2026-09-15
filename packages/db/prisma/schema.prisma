@@ -1,0 +1,2216 @@
+// MediSchool (SGEE) — PostgreSQL schema. See PLAN.md §7.
+// Conventions: uuid PKs, tenant_id on every business table (RLS in
+// migrations/*_rls), snake_case columns, created_at/updated_at, no DELETE on
+// clinical/meds/audit (triggers). States are text + CHECK constraints.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema", "postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_ADMIN_URL")
+  extensions = [pgcrypto, pg_trgm, citext, uuid_ossp(map: "uuid-ossp")]
+  schemas    = ["core", "people", "clinical", "meds", "inventory", "flow", "comms", "compliance", "audit", "integration"]
+}
+
+// ════════════════════════════════════════════════════════════════════ core ══
+
+model Tenant {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug        String   @unique
+  name        String
+  country     String   @default("CO")
+  timezone    String   @default("America/Bogota")
+  settings    Json     @default("{}")
+  logoUrl     String?  @map("logo_url")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("tenants")
+  @@schema("core")
+}
+
+model Campus {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  name      String
+  address   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([tenantId])
+  @@map("campuses")
+  @@schema("core")
+}
+
+model AcademicYear {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  name       String
+  startsOn   DateTime @map("starts_on") @db.Date
+  endsOn     DateTime @map("ends_on") @db.Date
+  current    Boolean  @default(false)
+  externalId String?  @map("external_id")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, name])
+  @@map("academic_years")
+  @@schema("core")
+}
+
+model Section {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  name       String
+  code       String
+  sortOrder  Int      @default(0) @map("sort_order")
+  externalId String?  @map("external_id")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  grades     Grade[]
+
+  @@unique([tenantId, code])
+  @@map("sections")
+  @@schema("core")
+}
+
+model Grade {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  sectionId  String   @map("section_id") @db.Uuid
+  name       String
+  code       String
+  sortOrder  Int      @default(0) @map("sort_order")
+  externalId String?  @map("external_id")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  section    Section  @relation(fields: [sectionId], references: [id])
+  groups     Group[]
+
+  @@unique([tenantId, code])
+  @@index([sectionId])
+  @@map("grades")
+  @@schema("core")
+}
+
+model Group {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  gradeId        String         @map("grade_id") @db.Uuid
+  academicYearId String?        @map("academic_year_id") @db.Uuid
+  name           String
+  code           String
+  homeroomUserId String?        @map("homeroom_user_id") @db.Uuid
+  externalId     String?        @map("external_id")
+  active         Boolean        @default(true)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  grade          Grade          @relation(fields: [gradeId], references: [id])
+  students       Student[]
+  teachers       TeacherGroup[]
+  scheduleBlocks ScheduleBlock[]
+
+  @@unique([tenantId, code])
+  @@index([gradeId])
+  @@map("groups")
+  @@schema("core")
+}
+
+model Period {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  academicYearId String?  @map("academic_year_id") @db.Uuid
+  name           String
+  startsOn       DateTime @map("starts_on") @db.Date
+  endsOn         DateTime @map("ends_on") @db.Date
+  externalId     String?  @map("external_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId])
+  @@map("periods")
+  @@schema("core")
+}
+
+model CalendarDay {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  date        DateTime @db.Date
+  kind        String   @default("SCHOOL_DAY")
+  description String?
+
+  @@unique([tenantId, date])
+  @@map("calendar_days")
+  @@schema("core")
+}
+
+model ScheduleBlock {
+  id            String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String  @map("tenant_id") @db.Uuid
+  groupId       String  @map("group_id") @db.Uuid
+  dayOfWeek     Int     @map("day_of_week")
+  startTime     String  @map("start_time")
+  endTime       String  @map("end_time")
+  subject       String
+  teacherUserId String? @map("teacher_user_id") @db.Uuid
+  group         Group   @relation(fields: [groupId], references: [id])
+
+  @@index([tenantId, groupId, dayOfWeek])
+  @@map("schedule_blocks")
+  @@schema("core")
+}
+
+model User {
+  id                 String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId           String                  @map("tenant_id") @db.Uuid
+  email              String                  @db.Citext
+  passwordHash       String?                 @map("password_hash")
+  firstName          String                  @map("first_name")
+  lastName           String                  @map("last_name")
+  phone              String?
+  personId           String?                 @map("person_id") @db.Uuid
+  active             Boolean                 @default(true)
+  locale             String                  @default("es-CO")
+  mustChangePassword Boolean                 @default(false) @map("must_change_password")
+  failedLogins       Int                     @default(0) @map("failed_logins")
+  lockedUntil        DateTime?               @map("locked_until") @db.Timestamptz(6)
+  lastLoginAt        DateTime?               @map("last_login_at") @db.Timestamptz(6)
+  kioskDeviceCode    String?                 @map("kiosk_device_code")
+  kioskPinHash       String?                 @map("kiosk_pin_hash")
+  createdAt          DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy          String?                 @map("created_by") @db.Uuid
+  roles              UserRole[]
+  sessions           Session[]
+  mfaDevices         MfaDevice[]
+  teacherGroups      TeacherGroup[]
+  person             Person?                 @relation(fields: [personId], references: [id])
+  notifications      Notification[]
+  preference         NotificationPreference?
+
+  @@unique([tenantId, email])
+  @@index([personId])
+  @@map("users")
+  @@schema("core")
+}
+
+model RoleDef {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  key         String
+  label       String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, key])
+  @@map("roles")
+  @@schema("core")
+}
+
+model PermissionDef {
+  key         String @id
+  description String?
+
+  @@map("permissions")
+  @@schema("core")
+}
+
+model RolePermission {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  roleKey       String   @map("role_key")
+  permissionKey String   @map("permission_key")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, roleKey, permissionKey])
+  @@map("role_permissions")
+  @@schema("core")
+}
+
+model UserRole {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  role           String
+  scopeSectionId String?  @map("scope_section_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user           User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, role, scopeSectionId])
+  @@index([tenantId])
+  @@map("user_roles")
+  @@schema("core")
+}
+
+model TeacherGroup {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  groupId   String   @map("group_id") @db.Uuid
+  subject   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id])
+  group     Group    @relation(fields: [groupId], references: [id])
+
+  @@unique([userId, groupId])
+  @@index([tenantId])
+  @@map("teacher_groups")
+  @@schema("core")
+}
+
+model Session {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @unique @map("refresh_token_hash")
+  kiosk            Boolean   @default(false)
+  ip               String?
+  userAgent        String?   @map("user_agent")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt       DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  user             User      @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, userId])
+  @@map("sessions")
+  @@schema("core")
+}
+
+model MfaDevice {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  type        String    @default("TOTP")
+  secretEnc   String    @map("secret_enc")
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, userId])
+  @@map("mfa_devices")
+  @@schema("core")
+}
+
+model ApiKey {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  name       String
+  keyHash    String    @unique @map("key_hash")
+  scopes     String[]
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy  String?   @map("created_by") @db.Uuid
+
+  @@index([tenantId])
+  @@map("api_keys")
+  @@schema("core")
+}
+
+model IdempotencyKey {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  key          String
+  method       String
+  path         String
+  requestHash  String   @map("request_hash")
+  statusCode   Int?     @map("status_code")
+  responseBody Json?    @map("response_body")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, userId, key])
+  @@map("idempotency_keys")
+  @@schema("core")
+}
+
+model LinkToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  purpose   String
+  tokenHash String    @unique @map("token_hash")
+  subjectId String    @map("subject_id") @db.Uuid
+  personId  String?   @map("person_id") @db.Uuid
+  userId    String?   @map("user_id") @db.Uuid
+  maxUses   Int       @default(1) @map("max_uses")
+  uses      Int       @default(0)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, subjectId])
+  @@map("link_tokens")
+  @@schema("core")
+}
+
+model Invitation {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  code         String    @unique
+  studentId    String    @map("student_id") @db.Uuid
+  relationship String
+  email        String?   @db.Citext
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt       DateTime? @map("used_at") @db.Timestamptz(6)
+  usedByUserId String?   @map("used_by_user_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy    String?   @map("created_by") @db.Uuid
+
+  @@index([tenantId, studentId])
+  @@map("invitations")
+  @@schema("core")
+}
+
+model StoredFile {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  storageKey    String   @unique @map("storage_key")
+  originalName  String   @map("original_name")
+  mimeType      String   @map("mime_type")
+  size          Int
+  sha256        String
+  kind          String
+  driver        String   @default("local")
+  encrypted     Boolean  @default(true)
+  scanStatus    String   @default("SKIPPED") @map("scan_status")
+  ownerPersonId String?  @map("owner_person_id") @db.Uuid
+  expiresOn     DateTime? @map("expires_on") @db.Date
+  uploadedBy    String?  @map("uploaded_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, ownerPersonId])
+  @@map("files")
+  @@schema("core")
+}
+
+model PushSubscription {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, userId])
+  @@map("push_subscriptions")
+  @@schema("core")
+}
+
+model ScheduledReport {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  name       String
+  kind       String
+  frequency  String
+  recipients String[]
+  params     Json      @default("{}")
+  lastRunAt  DateTime? @map("last_run_at") @db.Timestamptz(6)
+  active     Boolean   @default(true)
+  createdBy  String?   @map("created_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId])
+  @@map("scheduled_reports")
+  @@schema("core")
+}
+
+// ══════════════════════════════════════════════════════════════════ people ══
+
+model Person {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String            @map("tenant_id") @db.Uuid
+  kind           String
+  documentType   String?           @map("document_type")
+  documentNumber String?           @map("document_number")
+  firstName      String            @map("first_name")
+  lastName       String            @map("last_name")
+  birthDate      DateTime?         @map("birth_date") @db.Date
+  sex            String?
+  email          String?           @db.Citext
+  phone          String?
+  mobile         String?
+  address        String?
+  nationality    String?
+  photoKey       String?           @map("photo_key")
+  photoHash      String?           @map("photo_hash")
+  source         String            @default("LOCAL")
+  status         String            @default("ACTIVE")
+  inactiveReason String?           @map("inactive_reason")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy      String?           @map("created_by") @db.Uuid
+  updatedBy      String?           @map("updated_by") @db.Uuid
+  student        Student?
+  guardian       Guardian?
+  staff          Staff?
+  users          User[]
+  contacts       Contact[]
+  addresses      Address[]
+  healthProfile  HealthProfile?
+  allergies      Allergy[]
+  conditions     ChronicCondition[]
+  encounters     Encounter[]
+
+  @@index([tenantId, kind])
+  @@index([tenantId, documentNumber])
+  @@map("persons")
+  @@schema("people")
+}
+
+model Student {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String             @map("tenant_id") @db.Uuid
+  personId         String             @unique @map("person_id") @db.Uuid
+  code             String
+  currentGroupId   String?            @map("current_group_id") @db.Uuid
+  enrollmentStatus String?            @map("enrollment_status")
+  shift            String?
+  transport        String?
+  status           String             @default("ACTIVE")
+  inactiveReason   String?            @map("inactive_reason")
+  externalId       String?            @map("external_id")
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  person           Person             @relation(fields: [personId], references: [id])
+  group            Group?             @relation(fields: [currentGroupId], references: [id])
+  guardians        StudentGuardian[]
+  emergencyContacts EmergencyContact[]
+  enrollments      Enrollment[]
+  passes           Pass[]
+  medicationRequests MedicationRequest[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, currentGroupId])
+  @@map("students")
+  @@schema("people")
+}
+
+model Guardian {
+  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String            @map("tenant_id") @db.Uuid
+  personId   String            @unique @map("person_id") @db.Uuid
+  occupation String?
+  company    String?
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  person     Person            @relation(fields: [personId], references: [id])
+  students   StudentGuardian[]
+
+  @@index([tenantId])
+  @@map("guardians")
+  @@schema("people")
+}
+
+model StudentGuardian {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  studentId           String   @map("student_id") @db.Uuid
+  guardianId          String   @map("guardian_id") @db.Uuid
+  relationship        String
+  isPrimary           Boolean  @default(false) @map("is_primary")
+  canPickUp           Boolean  @default(true) @map("can_pick_up")
+  legalCustody        Boolean  @default(true) @map("legal_custody")
+  priority            Int      @default(1)
+  restrictions        String?
+  judicialRestriction Boolean  @default(false) @map("judicial_restriction")
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  student             Student  @relation(fields: [studentId], references: [id])
+  guardian            Guardian @relation(fields: [guardianId], references: [id])
+
+  @@unique([studentId, guardianId])
+  @@index([tenantId, guardianId])
+  @@map("student_guardians")
+  @@schema("people")
+}
+
+model Staff {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  personId         String   @unique @map("person_id") @db.Uuid
+  position         String?
+  sectionId        String?  @map("section_id") @db.Uuid
+  isTeacher        Boolean  @default(false) @map("is_teacher")
+  isFirstResponder Boolean  @default(false) @map("is_first_responder")
+  externalId       String?  @map("external_id")
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  person           Person   @relation(fields: [personId], references: [id])
+
+  @@index([tenantId])
+  @@map("staff")
+  @@schema("people")
+}
+
+model Contact {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  personId  String   @map("person_id") @db.Uuid
+  type      String
+  value     String
+  verified  Boolean  @default(false)
+  isPrimary Boolean  @default(false) @map("is_primary")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  person    Person   @relation(fields: [personId], references: [id])
+
+  @@index([tenantId, personId])
+  @@map("contacts")
+  @@schema("people")
+}
+
+model Address {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  personId     String   @map("person_id") @db.Uuid
+  line1        String
+  neighborhood String?
+  city         String?
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  person       Person   @relation(fields: [personId], references: [id])
+
+  @@index([tenantId, personId])
+  @@map("addresses")
+  @@schema("people")
+}
+
+model EmergencyContact {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  studentId      String    @map("student_id") @db.Uuid
+  name           String
+  relationship   String
+  phone          String
+  altPhone       String?   @map("alt_phone")
+  canPickUp      Boolean   @default(false) @map("can_pick_up")
+  documentNumber String?   @map("document_number")
+  notes          String?
+  verified       Boolean   @default(false)
+  verifiedAt     DateTime? @map("verified_at") @db.Timestamptz(6)
+  active         Boolean   @default(true)
+  createdBy      String?   @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  student        Student   @relation(fields: [studentId], references: [id])
+
+  @@index([tenantId, studentId])
+  @@map("emergency_contacts")
+  @@schema("people")
+}
+
+model Enrollment {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  studentId      String    @map("student_id") @db.Uuid
+  academicYearId String?   @map("academic_year_id") @db.Uuid
+  groupId        String?   @map("group_id") @db.Uuid
+  yearLabel      String    @map("year_label")
+  status         String
+  startedOn      DateTime? @map("started_on") @db.Date
+  endedOn        DateTime? @map("ended_on") @db.Date
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  student        Student   @relation(fields: [studentId], references: [id])
+
+  @@unique([studentId, yearLabel])
+  @@index([tenantId])
+  @@map("enrollments")
+  @@schema("people")
+}
+
+// ════════════════════════════════════════════════════════════════ clinical ══
+
+model HealthProfile {
+  id                           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId                     String    @map("tenant_id") @db.Uuid
+  personId                     String    @unique @map("person_id") @db.Uuid
+  bloodType                    String?   @map("blood_type")
+  eps                          String?
+  prepaidPlan                  String?   @map("prepaid_plan")
+  accidentInsurance            String?   @map("accident_insurance")
+  accidentPolicyNumber         String?   @map("accident_policy_number")
+  preferredIps                 String?   @map("preferred_ips")
+  physicalActivityRestrictions String?   @map("physical_activity_restrictions")
+  dietaryRestrictions          String?   @map("dietary_restrictions")
+  generalNotes                 String?   @map("general_notes")
+  version                      Int       @default(1)
+  completenessPct              Int       @default(0) @map("completeness_pct")
+  lastGuardianUpdateAt         DateTime? @map("last_guardian_update_at") @db.Timestamptz(6)
+  lastGuardianUpdateBy         String?   @map("last_guardian_update_by") @db.Uuid
+  reviewedAt                   DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewedBy                   String?   @map("reviewed_by") @db.Uuid
+  createdAt                    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  person                       Person    @relation(fields: [personId], references: [id])
+
+  @@index([tenantId])
+  @@map("health_profiles")
+  @@schema("clinical")
+}
+
+model Allergy {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String    @map("tenant_id") @db.Uuid
+  personId            String    @map("person_id") @db.Uuid
+  category            String
+  agent               String
+  reaction            String?
+  severity            String
+  requiresEpinephrine Boolean   @default(false) @map("requires_epinephrine")
+  notes               String?
+  verified            Boolean   @default(false)
+  active              Boolean   @default(true)
+  annulledAt          DateTime? @map("annulled_at") @db.Timestamptz(6)
+  annulReason         String?   @map("annul_reason")
+  annulledBy          String?   @map("annulled_by") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy           String?   @map("created_by") @db.Uuid
+  person              Person    @relation(fields: [personId], references: [id])
+
+  @@index([tenantId, personId])
+  @@map("allergies")
+  @@schema("clinical")
+}
+
+model ChronicCondition {
+  id                String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String     @map("tenant_id") @db.Uuid
+  personId          String     @map("person_id") @db.Uuid
+  name              String
+  icd10Code         String?    @map("icd10_code")
+  diagnosedAt       DateTime?  @map("diagnosed_at") @db.Date
+  critical          Boolean    @default(false)
+  treatingPhysician String?    @map("treating_physician")
+  notes             String?
+  active            Boolean    @default(true)
+  annulledAt        DateTime?  @map("annulled_at") @db.Timestamptz(6)
+  annulReason       String?    @map("annul_reason")
+  annulledBy        String?    @map("annulled_by") @db.Uuid
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy         String?    @map("created_by") @db.Uuid
+  person            Person     @relation(fields: [personId], references: [id])
+  carePlans         CarePlan[]
+
+  @@index([tenantId, personId])
+  @@map("chronic_conditions")
+  @@schema("clinical")
+}
+
+model CarePlan {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String            @map("tenant_id") @db.Uuid
+  personId          String            @map("person_id") @db.Uuid
+  conditionId       String?           @map("condition_id") @db.Uuid
+  title             String
+  triggers          Json              @default("[]")
+  symptoms          Json              @default("[]")
+  steps             Json              @default("[]")
+  rescueMedications Json              @default("[]") @map("rescue_medications")
+  contacts          Json              @default("[]")
+  reviewDate        DateTime?         @map("review_date") @db.Date
+  approvedBy        String?           @map("approved_by") @db.Uuid
+  approvedAt        DateTime?         @map("approved_at") @db.Timestamptz(6)
+  active            Boolean           @default(true)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy         String?           @map("created_by") @db.Uuid
+  condition         ChronicCondition? @relation(fields: [conditionId], references: [id])
+
+  @@index([tenantId, personId])
+  @@map("care_plans")
+  @@schema("clinical")
+}
+
+model Immunization {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  personId       String   @map("person_id") @db.Uuid
+  vaccine        String
+  doseLabel      String   @map("dose_label")
+  administeredOn DateTime @map("administered_on") @db.Date
+  lot            String?
+  provider       String?
+  cardFileId     String?  @map("card_file_id") @db.Uuid
+  verified       Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy      String?  @map("created_by") @db.Uuid
+
+  @@index([tenantId, personId])
+  @@map("immunizations")
+  @@schema("clinical")
+}
+
+model HomeMedication {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  personId  String   @map("person_id") @db.Uuid
+  name      String
+  dose      String
+  schedule  String
+  reason    String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by") @db.Uuid
+
+  @@index([tenantId, personId])
+  @@map("home_medications")
+  @@schema("clinical")
+}
+
+model MedicalDevice {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  personId    String   @map("person_id") @db.Uuid
+  type        String
+  description String
+  location    String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String?  @map("created_by") @db.Uuid
+
+  @@index([tenantId, personId])
+  @@map("devices")
+  @@schema("clinical")
+}
+
+model ActivityRestriction {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  personId          String    @map("person_id") @db.Uuid
+  description       String
+  validFrom         DateTime  @map("valid_from") @db.Date
+  validTo           DateTime? @map("valid_to") @db.Date
+  certificateFileId String?   @map("certificate_file_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy         String?   @map("created_by") @db.Uuid
+
+  @@index([tenantId, personId])
+  @@map("activity_restrictions")
+  @@schema("clinical")
+}
+
+model SurgicalHistory {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  personId    String    @map("person_id") @db.Uuid
+  kind        String
+  description String
+  date        DateTime? @db.Date
+  notes       String?
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String?   @map("created_by") @db.Uuid
+
+  @@index([tenantId, personId])
+  @@map("surgical_history")
+  @@schema("clinical")
+}
+
+model DisabilitySupport {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId              String   @map("tenant_id") @db.Uuid
+  personId              String   @map("person_id") @db.Uuid
+  description           String
+  hasPiar               Boolean  @default(false) @map("has_piar")
+  supports              String?
+  reasonableAdjustments String?  @map("reasonable_adjustments")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy             String?  @map("created_by") @db.Uuid
+
+  @@index([tenantId, personId])
+  @@map("disabilities_supports")
+  @@schema("clinical")
+}
+
+model Anthropometric {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  personId            String   @map("person_id") @db.Uuid
+  measuredAt          DateTime @map("measured_at") @db.Date
+  weightKg            Float    @map("weight_kg")
+  heightCm            Float    @map("height_cm")
+  headCircumferenceCm Float?   @map("head_circumference_cm")
+  bmi                 Float?
+  bmiZ                Float?   @map("bmi_z")
+  bmiPercentile       Float?   @map("bmi_percentile")
+  heightZ             Float?   @map("height_z")
+  weightZ             Float?   @map("weight_z")
+  classification      String?
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy           String?  @map("created_by") @db.Uuid
+
+  @@index([tenantId, personId, measuredAt])
+  @@map("anthropometrics")
+  @@schema("clinical")
+}
+
+model Screening {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  personId    String   @map("person_id") @db.Uuid
+  type        String
+  performedOn DateTime @map("performed_on") @db.Date
+  result      String
+  details     Json     @default("{}")
+  referral    String?
+  notes       String?
+  campaignId  String?  @map("campaign_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   String?  @map("created_by") @db.Uuid
+
+  @@index([tenantId, personId])
+  @@map("screenings")
+  @@schema("clinical")
+}
+
+model HealthDocument {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  personId   String    @map("person_id") @db.Uuid
+  fileId     String    @map("file_id") @db.Uuid
+  kind       String
+  title      String
+  expiresOn  DateTime? @map("expires_on") @db.Date
+  verifiedAt DateTime? @map("verified_at") @db.Timestamptz(6)
+  verifiedBy String?   @map("verified_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy  String?   @map("created_by") @db.Uuid
+
+  @@index([tenantId, personId])
+  @@map("health_documents")
+  @@schema("clinical")
+}
+
+model Encounter {
+  id                String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String                @map("tenant_id") @db.Uuid
+  personId          String                @map("person_id") @db.Uuid
+  subjectType       String                @default("STUDENT") @map("subject_type")
+  studentId         String?               @map("student_id") @db.Uuid
+  passId            String?               @unique @map("pass_id") @db.Uuid
+  type              String
+  status            String                @default("OPEN")
+  chiefComplaint    String                @map("chief_complaint")
+  templateKey       String?               @map("template_key")
+  referredBy        String?               @map("referred_by")
+  referredFrom      String?               @map("referred_from")
+  startedAt         DateTime              @default(now()) @map("started_at") @db.Timestamptz(6)
+  endedAt           DateTime?             @map("ended_at") @db.Timestamptz(6)
+  disposition       String?
+  subjective        String?
+  objective         String?
+  assessment        String?
+  plan              String?
+  physicalExam      Json                  @default("{}") @map("physical_exam")
+  treatments        Json                  @default("[]")
+  restMinutes       Int?                  @map("rest_minutes")
+  parentSummary     String?               @map("parent_summary")
+  isMentalHealth    Boolean               @default(false) @map("is_mental_health")
+  isHistorical      Boolean               @default(false) @map("is_historical")
+  source            String                @default("LOCAL")
+  externalId        String?               @map("external_id")
+  historicalData    Json?                 @map("historical_data")
+  attendedByUserId  String?               @map("attended_by_user_id") @db.Uuid
+  attendedByName    String?               @map("attended_by_name")
+  signedByUserId    String?               @map("signed_by_user_id") @db.Uuid
+  signedAt          DateTime?             @map("signed_at") @db.Timestamptz(6)
+  seq               BigInt?
+  hash              String?
+  prevHash          String?               @map("prev_hash")
+  annulledAt        DateTime?             @map("annulled_at") @db.Timestamptz(6)
+  annulledBy        String?               @map("annulled_by") @db.Uuid
+  annulReason       String?               @map("annul_reason")
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdBy         String?               @map("created_by") @db.Uuid
+  person            Person                @relation(fields: [personId], references: [id])
+  pass              Pass?                 @relation(fields: [passId], references: [id])
+  vitals            VitalSign[]
+  notes             EncounterNote[]
+  diagnoses         EncounterDiagnosis[]
+  procedures        EncounterProcedure[]
+  attachments       EncounterAttachment[]
+  observations      ObservationPeriod[]
+  referrals         Referral[]
+  incident          IncidentReport?
+
+  @@unique([tenantId, source, externalId])
+  @@index([tenantId, personId, startedAt])
+  @@index([tenantId, status])
+  @@index([tenantId, startedAt])
+  @@map("encounters")
+  @@schema("clinical")
+}
+
+model VitalSign {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  encounterId     String    @map("encounter_id") @db.Uuid
+  takenAt         DateTime  @default(now()) @map("taken_at") @db.Timestamptz(6)
+  temperatureC    Float?    @map("temperature_c")
+  heartRate       Int?      @map("heart_rate")
+  respiratoryRate Int?      @map("respiratory_rate")
+  systolic        Int?
+  diastolic       Int?
+  spo2            Int?
+  glucoseMgDl     Int?      @map("glucose_mg_dl")
+  painScore       Int?      @map("pain_score")
+  glasgow         Int?
+  worstLevel      String?   @map("worst_level")
+  takenBy         String?   @map("taken_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  encounter       Encounter @relation(fields: [encounterId], references: [id])
+
+  @@index([tenantId, encounterId])
+  @@map("vital_signs")
+  @@schema("clinical")
+}
+
+model EncounterNote {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  encounterId String    @map("encounter_id") @db.Uuid
+  kind        String
+  note        String
+  authorId    String?   @map("author_id") @db.Uuid
+  hash        String?
+  prevHash    String?   @map("prev_hash")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  encounter   Encounter @relation(fields: [encounterId], references: [id])
+
+  @@index([tenantId, encounterId])
+  @@map("encounter_notes")
+  @@schema("clinical")
+}
+
+model EncounterDiagnosis {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  encounterId String    @map("encounter_id") @db.Uuid
+  system      String    @default("ICD10")
+  code        String
+  description String
+  primary     Boolean   @default(false)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  encounter   Encounter @relation(fields: [encounterId], references: [id])
+
+  @@index([tenantId, code])
+  @@index([encounterId])
+  @@map("encounter_diagnoses")
+  @@schema("clinical")
+}
+
+model EncounterProcedure {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  encounterId     String    @map("encounter_id") @db.Uuid
+  description     String
+  itemId          String?   @map("item_id") @db.Uuid
+  quantity        Float?
+  stockMovementId String?   @map("stock_movement_id") @db.Uuid
+  performedBy     String?   @map("performed_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  encounter       Encounter @relation(fields: [encounterId], references: [id])
+
+  @@index([tenantId, encounterId])
+  @@map("encounter_procedures")
+  @@schema("clinical")
+}
+
+model EncounterAttachment {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  encounterId     String    @map("encounter_id") @db.Uuid
+  fileId          String    @map("file_id") @db.Uuid
+  kind            String
+  consentVerified Boolean   @default(false) @map("consent_verified")
+  createdBy       String?   @map("created_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  encounter       Encounter @relation(fields: [encounterId], references: [id])
+
+  @@index([tenantId, encounterId])
+  @@map("encounter_attachments")
+  @@schema("clinical")
+}
+
+model ObservationPeriod {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  encounterId String    @map("encounter_id") @db.Uuid
+  reason      String
+  startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  dueAt       DateTime  @map("due_at") @db.Timestamptz(6)
+  alertedAt   DateTime? @map("alerted_at") @db.Timestamptz(6)
+  endedAt     DateTime? @map("ended_at") @db.Timestamptz(6)
+  outcome     String?
+  recheckedBy String?   @map("rechecked_by") @db.Uuid
+  encounter   Encounter @relation(fields: [encounterId], references: [id])
+
+  @@index([tenantId, endedAt])
+  @@map("observation_periods")
+  @@schema("clinical")
+}
+
+model Referral {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  encounterId String    @map("encounter_id") @db.Uuid
+  destination String
+  transport   String
+  departedAt  DateTime? @map("departed_at") @db.Timestamptz(6)
+  companion   String?
+  reason      String
+  createdBy   String?   @map("created_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  encounter   Encounter @relation(fields: [encounterId], references: [id])
+
+  @@index([tenantId, encounterId])
+  @@map("referrals")
+  @@schema("clinical")
+}
+
+model IncidentReport {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  encounterId        String    @unique @map("encounter_id") @db.Uuid
+  place              String
+  activity           String?
+  mechanism          String
+  severity           String    @default("MILD")
+  witnesses          Json      @default("[]")
+  supervisingStaff   String?   @map("supervising_staff")
+  insuranceNotified  Boolean   @default(false) @map("insurance_notified")
+  workAccidentReport Boolean   @default(false) @map("work_accident_report")
+  preventiveActions  String?   @map("preventive_actions")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  encounter          Encounter @relation(fields: [encounterId], references: [id])
+
+  @@index([tenantId, place])
+  @@map("incident_reports")
+  @@schema("clinical")
+}
+
+model MentalHealthNote {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  personId    String   @map("person_id") @db.Uuid
+  encounterId String?  @map("encounter_id") @db.Uuid
+  noteEnc     Bytes    @map("note_enc")
+  riskLevel   String   @default("NONE") @map("risk_level")
+  referral    String?
+  authorId    String   @map("author_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, personId])
+  @@map("mental_health_notes")
+  @@schema("clinical")
+}
+
+model ClinicalAccessLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  personId   String   @map("person_id") @db.Uuid
+  resource   String
+  action     String   @default("READ")
+  reason     String?
+  outOfRole  Boolean  @default(false) @map("out_of_role")
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, personId, createdAt])
+  @@index([tenantId, userId, createdAt])
+  @@map("clinical_access_log")
+  @@schema("clinical")
+}
+
+model OutbreakSignal {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  scope         String
+  scopeId       String    @map("scope_id")
+  scopeName     String    @map("scope_name")
+  syndrome      String
+  cases         Int
+  population    Int
+  attackRatePct Float     @map("attack_rate_pct")
+  firstCaseAt   DateTime  @map("first_case_at") @db.Timestamptz(6)
+  lastCaseAt    DateTime  @map("last_case_at") @db.Timestamptz(6)
+  studentIds    String[]  @map("student_ids")
+  status        String    @default("OPEN")
+  dedupeKey     String    @map("dedupe_key")
+  detectedAt    DateTime  @default(now()) @map("detected_at") @db.Timestamptz(6)
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
+  notes         String?
+
+  @@unique([tenantId, dedupeKey])
+  @@map("outbreak_signals")
+  @@schema("clinical")
+}
+
+model Campaign {
+  id           String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String                @map("tenant_id") @db.Uuid
+  name         String
+  kind         String
+  startsOn     DateTime              @map("starts_on") @db.Date
+  endsOn       DateTime              @map("ends_on") @db.Date
+  description  String?
+  audience     Json                  @default("{}")
+  status       String                @default("PLANNED")
+  createdBy    String?               @map("created_by") @db.Uuid
+  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  participants CampaignParticipant[]
+
+  @@index([tenantId])
+  @@map("campaigns")
+  @@schema("clinical")
+}
+
+model CampaignParticipant {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  campaignId String    @map("campaign_id") @db.Uuid
+  studentId  String    @map("student_id") @db.Uuid
+  status     String    @default("PENDING")
+  notes      String?
+  doneAt     DateTime? @map("done_at") @db.Timestamptz(6)
+  recordedBy String?   @map("recorded_by") @db.Uuid
+  campaign   Campaign  @relation(fields: [campaignId], references: [id])
+
+  @@unique([campaignId, studentId])
+  @@index([tenantId])
+  @@map("campaign_participants")
+  @@schema("clinical")
+}
+
+model AbsenceExcuse {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  studentId        String    @map("student_id") @db.Uuid
+  fromDate         DateTime  @map("from_date") @db.Date
+  toDate           DateTime  @map("to_date") @db.Date
+  reason           String
+  illness          Boolean   @default(true)
+  symptoms         String?
+  attachmentFileId String?   @map("attachment_file_id") @db.Uuid
+  submittedBy      String?   @map("submitted_by") @db.Uuid
+  status           String    @default("SUBMITTED")
+  validatedBy      String?   @map("validated_by") @db.Uuid
+  validatedAt      DateTime? @map("validated_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, studentId])
+  @@map("absence_excuses")
+  @@schema("clinical")
+}
+
+model FieldTrip {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  name             String
+  date             DateTime @db.Date
+  destination      String
+  groupIds         String[] @map("group_ids")
+  kitId            String?  @map("kit_id") @db.Uuid
+  responsibleStaff String?  @map("responsible_staff")
+  createdBy        String?  @map("created_by") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, date])
+  @@map("field_trips")
+  @@schema("clinical")
+}
+
+model EmergencyDrill {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  protocolKey     String   @map("protocol_key")
+  performedOn     DateTime @map("performed_on") @db.Date
+  participants    Int      @default(0)
+  durationMinutes Int?     @map("duration_minutes")
+  findings        String?
+  createdBy       String?  @map("created_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId])
+  @@map("emergency_drills")
+  @@schema("clinical")
+}
+
+model SafetyResource {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  kind      String
+  name      String
+  location  String
+  details   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId])
+  @@map("safety_resources")
+  @@schema("clinical")
+}
+
+// ════════════════════════════════════════════════════════════════════ meds ══
+
+model MedicationCatalog {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId              String   @map("tenant_id") @db.Uuid
+  genericName           String   @map("generic_name")
+  brandNames            String[] @map("brand_names")
+  form                  String
+  concentration         String
+  route                 String
+  atc                   String?
+  otcAllowed            Boolean  @default(false) @map("otc_allowed")
+  controlled            Boolean  @default(false)
+  requiresRefrigeration Boolean  @default(false) @map("requires_refrigeration")
+  rescue                Boolean  @default(false)
+  active                Boolean  @default(true)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, genericName, form, concentration])
+  @@map("medication_catalog")
+  @@schema("meds")
+}
+
+model MedicationRequest {
+  id                 String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId           String                     @map("tenant_id") @db.Uuid
+  studentId          String                     @map("student_id") @db.Uuid
+  requestedByUserId  String?                    @map("requested_by_user_id") @db.Uuid
+  guardianPersonId   String?                    @map("guardian_person_id") @db.Uuid
+  catalogId          String?                    @map("catalog_id") @db.Uuid
+  medicationName     String                     @map("medication_name")
+  activeIngredient   String?                    @map("active_ingredient")
+  presentation       String?
+  dose               Float
+  doseUnit           String                     @map("dose_unit")
+  route              String
+  frequency          String
+  times              String[]
+  daysOfWeek         Int[]                      @map("days_of_week")
+  startDate          DateTime                   @map("start_date") @db.Date
+  endDate            DateTime                   @map("end_date") @db.Date
+  indication         String
+  prescriberName     String?                    @map("prescriber_name")
+  prescriberLicense  String?                    @map("prescriber_license")
+  isPrn              Boolean                    @default(false) @map("is_prn")
+  prnCriteria        String?                    @map("prn_criteria")
+  minIntervalMinutes Int?                       @map("min_interval_minutes")
+  maxDosesPerDay     Int?                       @map("max_doses_per_day")
+  selfAdministration Boolean                    @default(false) @map("self_administration")
+  storage            String                     @default("SHELF")
+  controlled         Boolean                    @default(false)
+  notes              String?
+  status             String                     @default("SUBMITTED")
+  reviewedBy         String?                    @map("reviewed_by") @db.Uuid
+  reviewedAt         DateTime?                  @map("reviewed_at") @db.Timestamptz(6)
+  reviewReason       String?                    @map("review_reason")
+  reviewChecks       Json?                      @map("review_checks")
+  consentId          String?                    @map("consent_id") @db.Uuid
+  statusReason       String?                    @map("status_reason")
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  student            Student                    @relation(fields: [studentId], references: [id])
+  prescriptions      Prescription[]
+  custody            MedicationCustody[]
+  schedule           MedicationSchedule[]
+  administrations    MedicationAdministration[]
+
+  @@index([tenantId, studentId, status])
+  @@map("medication_requests")
+  @@schema("meds")
+}
+
+model Prescription {
+  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String            @map("tenant_id") @db.Uuid
+  requestId  String            @map("request_id") @db.Uuid
+  fileId     String            @map("file_id") @db.Uuid
+  issuedOn   DateTime?         @map("issued_on") @db.Date
+  validUntil DateTime?         @map("valid_until") @db.Date
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  request    MedicationRequest @relation(fields: [requestId], references: [id])
+
+  @@index([tenantId, requestId])
+  @@map("prescriptions")
+  @@schema("meds")
+}
+
+model MedicationCustody {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String            @map("tenant_id") @db.Uuid
+  requestId         String            @map("request_id") @db.Uuid
+  quantityReceived  Float             @map("quantity_received")
+  quantityRemaining Float             @map("quantity_remaining")
+  unit              String
+  lot               String
+  expiryDate        DateTime          @map("expiry_date") @db.Date
+  deliveredBy       String            @map("delivered_by")
+  receivedByUserId  String            @map("received_by_user_id") @db.Uuid
+  storage           String
+  locationId        String?           @map("location_id") @db.Uuid
+  packagingIntact   Boolean           @map("packaging_intact")
+  labeled           Boolean
+  notes             String?
+  receivedAt        DateTime          @default(now()) @map("received_at") @db.Timestamptz(6)
+  closedAt          DateTime?         @map("closed_at") @db.Timestamptz(6)
+  closeAction       String?           @map("close_action")
+  closeQuantity     Float?            @map("close_quantity")
+  closeReceivedBy   String?           @map("close_received_by")
+  closeNotes        String?           @map("close_notes")
+  request           MedicationRequest @relation(fields: [requestId], references: [id])
+
+  @@index([tenantId, requestId])
+  @@map("medication_custody")
+  @@schema("meds")
+}
+
+model MedicationSchedule {
+  id            String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String                     @map("tenant_id") @db.Uuid
+  requestId     String                     @map("request_id") @db.Uuid
+  studentId     String                     @map("student_id") @db.Uuid
+  scheduledFor  DateTime                   @map("scheduled_for") @db.Timestamptz(6)
+  status        String                     @default("PENDING")
+  alertedAt     DateTime?                  @map("alerted_at") @db.Timestamptz(6)
+  createdAt     DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  request       MedicationRequest          @relation(fields: [requestId], references: [id])
+  administrations MedicationAdministration[]
+
+  @@unique([requestId, scheduledFor])
+  @@index([tenantId, scheduledFor, status])
+  @@map("medication_schedule")
+  @@schema("meds")
+}
+
+model MedicationAdministration {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId             String              @map("tenant_id") @db.Uuid
+  requestId            String              @map("request_id") @db.Uuid
+  scheduleId           String?             @map("schedule_id") @db.Uuid
+  studentId            String              @map("student_id") @db.Uuid
+  custodyId            String?             @map("custody_id") @db.Uuid
+  encounterId          String?             @map("encounter_id") @db.Uuid
+  administeredAt       DateTime            @default(now()) @map("administered_at") @db.Timestamptz(6)
+  administeredByUserId String              @map("administered_by_user_id") @db.Uuid
+  witnessUserId        String?             @map("witness_user_id") @db.Uuid
+  dose                 Float
+  doseUnit             String              @map("dose_unit")
+  route                String
+  outcome              String
+  reason               String?
+  adverseEffects       String?             @map("adverse_effects")
+  verification         Json                @default("{}")
+  selfAdministered     Boolean             @default(false) @map("self_administered")
+  notes                String?
+  seq                  BigInt?
+  hash                 String?
+  prevHash             String?             @map("prev_hash")
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  request              MedicationRequest   @relation(fields: [requestId], references: [id])
+  schedule             MedicationSchedule? @relation(fields: [scheduleId], references: [id])
+
+  @@index([tenantId, studentId, administeredAt])
+  @@index([tenantId, administeredAt])
+  @@map("medication_administrations")
+  @@schema("meds")
+}
+
+// ═══════════════════════════════════════════════════════════════ inventory ══
+
+model Item {
+  id                    String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId              String          @map("tenant_id") @db.Uuid
+  kind                  String
+  name                  String
+  genericName           String?         @map("generic_name")
+  presentation          String?
+  concentration         String?
+  unit                  String
+  atcCode               String?         @map("atc_code")
+  requiresRefrigeration Boolean         @default(false) @map("requires_refrigeration")
+  controlled            Boolean         @default(false)
+  minStock              Float           @default(0) @map("min_stock")
+  maxStock              Float?          @map("max_stock")
+  unitCost              Float?          @map("unit_cost")
+  catalogMedicationId   String?         @map("catalog_medication_id") @db.Uuid
+  active                Boolean         @default(true)
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  batches               ItemBatch[]
+  movements             StockMovement[]
+
+  @@unique([tenantId, name])
+  @@map("items")
+  @@schema("inventory")
+}
+
+model Location {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String      @map("tenant_id") @db.Uuid
+  campusId  String?     @map("campus_id") @db.Uuid
+  name      String
+  kind      String
+  minTempC  Float?      @map("min_temp_c")
+  maxTempC  Float?      @map("max_temp_c")
+  active    Boolean     @default(true)
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  batches   ItemBatch[]
+
+  @@unique([tenantId, name])
+  @@map("locations")
+  @@schema("inventory")
+}
+
+model ItemBatch {
+  id         String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String          @map("tenant_id") @db.Uuid
+  itemId     String          @map("item_id") @db.Uuid
+  locationId String          @map("location_id") @db.Uuid
+  lot        String
+  expiryDate DateTime?       @map("expiry_date") @db.Date
+  quantity   Float
+  unitCost   Float?          @map("unit_cost")
+  supplierId String?         @map("supplier_id") @db.Uuid
+  source     String
+  status     String          @default("ACTIVE")
+  receivedAt DateTime        @default(now()) @map("received_at") @db.Timestamptz(6)
+  createdAt  DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  item       Item            @relation(fields: [itemId], references: [id])
+  location   Location        @relation(fields: [locationId], references: [id])
+  movements  StockMovement[]
+
+  @@unique([itemId, lot, locationId])
+  @@index([tenantId, itemId, expiryDate])
+  @@map("item_batches")
+  @@schema("inventory")
+}
+
+model StockMovement {
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId           String     @map("tenant_id") @db.Uuid
+  itemId             String     @map("item_id") @db.Uuid
+  batchId            String?    @map("batch_id") @db.Uuid
+  locationId         String     @map("location_id") @db.Uuid
+  type               String
+  quantity           Float
+  reason             String?
+  encounterId        String?    @map("encounter_id") @db.Uuid
+  administrationId   String?    @map("administration_id") @db.Uuid
+  purchaseOrderId    String?    @map("purchase_order_id") @db.Uuid
+  performedByUserId  String     @map("performed_by_user_id") @db.Uuid
+  secondSignerUserId String?    @map("second_signer_user_id") @db.Uuid
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  item               Item       @relation(fields: [itemId], references: [id])
+  batch              ItemBatch? @relation(fields: [batchId], references: [id])
+
+  @@index([tenantId, itemId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("stock_movements")
+  @@schema("inventory")
+}
+
+model Supplier {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String
+  taxId       String?  @map("tax_id")
+  contactName String?  @map("contact_name")
+  phone       String?
+  email       String?  @db.Citext
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, name])
+  @@map("suppliers")
+  @@schema("inventory")
+}
+
+model PurchaseOrder {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  supplierId String    @map("supplier_id") @db.Uuid
+  number     Int
+  status     String    @default("DRAFT")
+  expectedOn DateTime? @map("expected_on") @db.Date
+  lines      Json      @default("[]")
+  total      Float     @default(0)
+  notes      String?
+  createdBy  String?   @map("created_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, number])
+  @@map("purchase_orders")
+  @@schema("inventory")
+}
+
+model Kit {
+  id                  String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String     @map("tenant_id") @db.Uuid
+  name                String
+  kind                String
+  locationDescription String     @map("location_description")
+  sectionId           String?    @map("section_id") @db.Uuid
+  checkEveryDays      Int        @default(30) @map("check_every_days")
+  items               Json       @default("[]")
+  lastCheckedAt       DateTime?  @map("last_checked_at") @db.Timestamptz(6)
+  active              Boolean    @default(true)
+  createdAt           DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  checks              KitCheck[]
+
+  @@unique([tenantId, name])
+  @@map("kits")
+  @@schema("inventory")
+}
+
+model KitCheck {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  kitId           String   @map("kit_id") @db.Uuid
+  checkedByUserId String   @map("checked_by_user_id") @db.Uuid
+  lines           Json     @default("[]")
+  ok              Boolean
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  kit             Kit      @relation(fields: [kitId], references: [id])
+
+  @@index([tenantId, kitId])
+  @@map("kit_checks")
+  @@schema("inventory")
+}
+
+model FridgeTemperatureLog {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  locationId       String   @map("location_id") @db.Uuid
+  temperatureC     Float    @map("temperature_c")
+  recordedAt       DateTime @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  recordedByUserId String?  @map("recorded_by_user_id") @db.Uuid
+  outOfRange       Boolean  @default(false) @map("out_of_range")
+  notes            String?
+
+  @@index([tenantId, locationId, recordedAt])
+  @@map("fridge_temperature_logs")
+  @@schema("inventory")
+}
+
+// ════════════════════════════════════════════════════════════════════ flow ══
+
+model Pass {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String             @map("tenant_id") @db.Uuid
+  studentId         String             @map("student_id") @db.Uuid
+  issuedByUserId    String?            @map("issued_by_user_id") @db.Uuid
+  code              String
+  qrToken           String             @unique @map("qr_token")
+  subject           String?
+  classroom         String?
+  reason            String
+  urgency           String             @default("MEDIUM")
+  accompanied       Boolean            @default(false)
+  companionName     String?            @map("companion_name")
+  notes             String?
+  state             String             @default("REQUESTED")
+  requestedAt       DateTime           @default(now()) @map("requested_at") @db.Timestamptz(6)
+  inTransitAt       DateTime?          @map("in_transit_at") @db.Timestamptz(6)
+  receivedAt        DateTime?          @map("received_at") @db.Timestamptz(6)
+  inCareAt          DateTime?          @map("in_care_at") @db.Timestamptz(6)
+  observationAt     DateTime?          @map("observation_at") @db.Timestamptz(6)
+  returnedAt        DateTime?          @map("returned_at") @db.Timestamptz(6)
+  waitingGuardianAt DateTime?          @map("waiting_guardian_at") @db.Timestamptz(6)
+  exitAuthorizedAt  DateTime?          @map("exit_authorized_at") @db.Timestamptz(6)
+  handedOverAt      DateTime?          @map("handed_over_at") @db.Timestamptz(6)
+  transferredAt     DateTime?          @map("transferred_at") @db.Timestamptz(6)
+  closedAt          DateTime?          @map("closed_at") @db.Timestamptz(6)
+  cancelledAt       DateTime?          @map("cancelled_at") @db.Timestamptz(6)
+  expiredAt         DateTime?          @map("expired_at") @db.Timestamptz(6)
+  transitAlertedAt  DateTime?          @map("transit_alerted_at") @db.Timestamptz(6)
+  slaBreaches       Json               @default("[]") @map("sla_breaches")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  student           Student            @relation(fields: [studentId], references: [id])
+  events            PassEvent[]
+  encounter         Encounter?
+  exitAuthorization ExitAuthorization?
+
+  @@index([tenantId, state])
+  @@index([tenantId, requestedAt])
+  @@index([tenantId, studentId])
+  @@index([tenantId, issuedByUserId])
+  @@map("passes")
+  @@schema("flow")
+}
+
+model PassTransitionRule {
+  fromState String @map("from_state")
+  toState   String @map("to_state")
+
+  @@id([fromState, toState])
+  @@map("pass_transitions")
+  @@schema("flow")
+}
+
+model PassEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  passId      String   @map("pass_id") @db.Uuid
+  fromState   String?  @map("from_state")
+  toState     String   @map("to_state")
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  actorRole   String   @map("actor_role")
+  note        String?
+  ip          String?
+  userAgent   String?  @map("user_agent")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  pass        Pass     @relation(fields: [passId], references: [id])
+
+  @@index([tenantId, passId])
+  @@map("pass_events")
+  @@schema("flow")
+}
+
+model ExitAuthorization {
+  id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId              String        @map("tenant_id") @db.Uuid
+  passId                String?       @unique @map("pass_id") @db.Uuid
+  studentId             String        @map("student_id") @db.Uuid
+  authorizedByUserId    String        @map("authorized_by_user_id") @db.Uuid
+  reason                String
+  status                String        @default("PENDING_GUARDIAN")
+  guardiansNotified     Json          @default("[]") @map("guardians_notified")
+  confirmedByPersonId   String?       @map("confirmed_by_person_id") @db.Uuid
+  confirmedByUserId     String?       @map("confirmed_by_user_id") @db.Uuid
+  confirmedAt           DateTime?     @map("confirmed_at") @db.Timestamptz(6)
+  pickupGuardianPersonId String?      @map("pickup_guardian_person_id") @db.Uuid
+  pickupName            String?       @map("pickup_name")
+  pickupDocument        String?       @map("pickup_document")
+  pickupRelationship    String?       @map("pickup_relationship")
+  pickupPhone           String?       @map("pickup_phone")
+  estimatedArrival      String?       @map("estimated_arrival")
+  standingPermissionId  String?       @map("standing_permission_id") @db.Uuid
+  qrToken               String        @unique @map("qr_token")
+  expiresAt             DateTime      @map("expires_at") @db.Timestamptz(6)
+  cancelledAt           DateTime?     @map("cancelled_at") @db.Timestamptz(6)
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  pass                  Pass?         @relation(fields: [passId], references: [id])
+  checkout              GateCheckout?
+
+  @@index([tenantId, status])
+  @@map("exit_authorizations")
+  @@schema("flow")
+}
+
+model GateCheckout {
+  id                  String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String            @map("tenant_id") @db.Uuid
+  exitAuthorizationId String            @unique @map("exit_authorization_id") @db.Uuid
+  studentId           String            @map("student_id") @db.Uuid
+  validatedByUserId   String            @map("validated_by_user_id") @db.Uuid
+  checkedOutAt        DateTime          @default(now()) @map("checked_out_at") @db.Timestamptz(6)
+  method              String
+  verifiedDocument    String?           @map("verified_document")
+  signatureFileId     String?           @map("signature_file_id") @db.Uuid
+  observations        String?
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  exitAuthorization   ExitAuthorization @relation(fields: [exitAuthorizationId], references: [id])
+
+  @@index([tenantId, checkedOutAt])
+  @@map("gate_checkouts")
+  @@schema("flow")
+}
+
+model StandingExitPermission {
+  id                        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId                  String    @map("tenant_id") @db.Uuid
+  studentId                 String    @map("student_id") @db.Uuid
+  grantedByGuardianPersonId String?   @map("granted_by_guardian_person_id") @db.Uuid
+  grantedByUserId           String    @map("granted_by_user_id") @db.Uuid
+  validFrom                 DateTime  @map("valid_from") @db.Date
+  validTo                   DateTime  @map("valid_to") @db.Date
+  conditions                String
+  active                    Boolean   @default(true)
+  revokedAt                 DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, studentId])
+  @@map("standing_exit_permissions")
+  @@schema("flow")
+}
+
+// ═══════════════════════════════════════════════════════════════════ comms ══
+
+model NotificationTemplate {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  event     String
+  channel   String
+  locale    String   @default("es-CO")
+  subject   String?
+  body      String
+  active    Boolean  @default(true)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, event, channel, locale])
+  @@map("notification_templates")
+  @@schema("comms")
+}
+
+model NotificationPreference {
+  id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String  @map("tenant_id") @db.Uuid
+  userId          String  @unique @map("user_id") @db.Uuid
+  channels        Json    @default("{\"IN_APP\":true,\"EMAIL\":true}")
+  quietHoursStart String  @default("20:00") @map("quiet_hours_start")
+  quietHoursEnd   String  @default("06:00") @map("quiet_hours_end")
+  language        String  @default("es-CO")
+  whatsappNumber  String? @map("whatsapp_number")
+  user            User    @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@map("notification_preferences")
+  @@schema("comms")
+}
+
+model Notification {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  userId            String?   @map("user_id") @db.Uuid
+  recipientAddress  String?   @map("recipient_address")
+  channel           String
+  event             String
+  subject           String?
+  body              String
+  link              String?
+  urgent            Boolean   @default(false)
+  status            String    @default("QUEUED")
+  provider          String?
+  providerMessageId String?   @map("provider_message_id")
+  error             String?
+  attempts          Int       @default(0)
+  entity            String?
+  entityId          String?   @map("entity_id")
+  dedupeKey         String?   @map("dedupe_key")
+  scheduledFor      DateTime  @default(now()) @map("scheduled_for") @db.Timestamptz(6)
+  sentAt            DateTime? @map("sent_at") @db.Timestamptz(6)
+  deliveredAt       DateTime? @map("delivered_at") @db.Timestamptz(6)
+  readAt            DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user              User?     @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, dedupeKey])
+  @@index([tenantId, userId, createdAt])
+  @@index([status, scheduledFor])
+  @@map("notifications")
+  @@schema("comms")
+}
+
+model MessageThread {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String              @map("tenant_id") @db.Uuid
+  studentId       String?             @map("student_id") @db.Uuid
+  encounterId     String?             @map("encounter_id") @db.Uuid
+  subject         String
+  createdByUserId String              @map("created_by_user_id") @db.Uuid
+  closedAt        DateTime?           @map("closed_at") @db.Timestamptz(6)
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  messages        Message[]
+  participants    ThreadParticipant[]
+
+  @@index([tenantId, studentId])
+  @@map("message_threads")
+  @@schema("comms")
+}
+
+model ThreadParticipant {
+  id         String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String        @map("tenant_id") @db.Uuid
+  threadId   String        @map("thread_id") @db.Uuid
+  userId     String        @map("user_id") @db.Uuid
+  lastReadAt DateTime?     @map("last_read_at") @db.Timestamptz(6)
+  thread     MessageThread @relation(fields: [threadId], references: [id])
+
+  @@unique([threadId, userId])
+  @@index([tenantId, userId])
+  @@map("thread_participants")
+  @@schema("comms")
+}
+
+model Message {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String        @map("tenant_id") @db.Uuid
+  threadId      String        @map("thread_id") @db.Uuid
+  authorUserId  String        @map("author_user_id") @db.Uuid
+  body          String
+  attachmentIds String[]      @map("attachment_ids")
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  thread        MessageThread @relation(fields: [threadId], references: [id])
+
+  @@index([tenantId, threadId, createdAt])
+  @@map("messages")
+  @@schema("comms")
+}
+
+model Circular {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String              @map("tenant_id") @db.Uuid
+  title           String
+  body            String
+  category        String              @default("GENERAL")
+  audience        Json                @default("{}")
+  channels        String[]
+  recipientsCount Int                 @default(0) @map("recipients_count")
+  publishedAt     DateTime            @default(now()) @map("published_at") @db.Timestamptz(6)
+  createdByUserId String              @map("created_by_user_id") @db.Uuid
+  recipients      CircularRecipient[]
+
+  @@index([tenantId, publishedAt])
+  @@map("circulars")
+  @@schema("comms")
+}
+
+model CircularRecipient {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  circularId String    @map("circular_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  readAt     DateTime? @map("read_at") @db.Timestamptz(6)
+  circular   Circular  @relation(fields: [circularId], references: [id])
+
+  @@unique([circularId, userId])
+  @@index([tenantId, userId])
+  @@map("circular_recipients")
+  @@schema("comms")
+}
+
+// ══════════════════════════════════════════════════════════════ compliance ══
+
+model ComplianceProfile {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  country   String
+  name      String
+  rules     Json
+  active    Boolean  @default(false)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, country])
+  @@map("compliance_profiles")
+  @@schema("compliance")
+}
+
+model ConsentTemplate {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  type          String
+  title         String
+  body          String
+  bodyHash      String    @map("body_hash")
+  version       String
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  mandatory     Boolean   @default(true)
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  consents      Consent[]
+
+  @@unique([tenantId, type, version])
+  @@map("consent_templates")
+  @@schema("compliance")
+}
+
+model Consent {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String          @map("tenant_id") @db.Uuid
+  templateId       String          @map("template_id") @db.Uuid
+  studentId        String          @map("student_id") @db.Uuid
+  guardianPersonId String?         @map("guardian_person_id") @db.Uuid
+  signedByUserId   String          @map("signed_by_user_id") @db.Uuid
+  status           String          @default("GRANTED")
+  signedAt         DateTime        @default(now()) @map("signed_at") @db.Timestamptz(6)
+  method           String          @default("OTP")
+  ip               String?
+  userAgent        String?         @map("user_agent")
+  signatureHash    String          @map("signature_hash")
+  revokedAt        DateTime?       @map("revoked_at") @db.Timestamptz(6)
+  revokeReason     String?         @map("revoke_reason")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  template         ConsentTemplate @relation(fields: [templateId], references: [id])
+
+  @@index([tenantId, studentId, status])
+  @@map("consents")
+  @@schema("compliance")
+}
+
+model ConsentOtp {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  templateId String    @map("template_id") @db.Uuid
+  studentId  String    @map("student_id") @db.Uuid
+  codeHash   String    @map("code_hash")
+  attempts   Int       @default(0)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt     DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, userId])
+  @@map("consent_otps")
+  @@schema("compliance")
+}
+
+model DataSubjectRequest {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  type              String
+  subjectPersonId   String    @map("subject_person_id") @db.Uuid
+  requestedByUserId String    @map("requested_by_user_id") @db.Uuid
+  description       String
+  status            String    @default("RECEIVED")
+  dueAt             DateTime  @map("due_at") @db.Timestamptz(6)
+  resolution        String?
+  resolvedByUserId  String?   @map("resolved_by_user_id") @db.Uuid
+  resolvedAt        DateTime? @map("resolved_at") @db.Timestamptz(6)
+  exportFileId      String?   @map("export_file_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, status])
+  @@map("data_subject_requests")
+  @@schema("compliance")
+}
+
+model RetentionPolicy {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  entity         String
+  retentionYears Int      @map("retention_years")
+  action         String   @default("REVIEW")
+  active         Boolean  @default(true)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, entity])
+  @@map("retention_policies")
+  @@schema("compliance")
+}
+
+model RetentionFlag {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  personId  String    @map("person_id") @db.Uuid
+  entity    String
+  reason    String
+  dueSince  DateTime  @map("due_since") @db.Date
+  status    String    @default("PENDING")
+  actedAt   DateTime? @map("acted_at") @db.Timestamptz(6)
+  actedBy   String?   @map("acted_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, personId, entity])
+  @@map("retention_flags")
+  @@schema("compliance")
+}
+
+model LegalHold {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  personId         String    @map("person_id") @db.Uuid
+  reason           String
+  reference        String?
+  createdByUserId  String    @map("created_by_user_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  releasedAt       DateTime? @map("released_at") @db.Timestamptz(6)
+  releasedByUserId String?   @map("released_by_user_id") @db.Uuid
+
+  @@index([tenantId, personId])
+  @@map("legal_holds")
+  @@schema("compliance")
+}
+
+model MandatoryReport {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  type            String
+  studentId       String?   @map("student_id") @db.Uuid
+  encounterId     String?   @map("encounter_id") @db.Uuid
+  authority       String
+  details         String
+  status          String    @default("DRAFT")
+  filedReference  String?   @map("filed_reference")
+  dueAt           DateTime  @map("due_at") @db.Timestamptz(6)
+  filedAt         DateTime? @map("filed_at") @db.Timestamptz(6)
+  createdByUserId String    @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, status])
+  @@map("mandatory_reports")
+  @@schema("compliance")
+}
+
+// ═══════════════════════════════════════════════════════════════════ audit ══
+
+model AuditLog {
+  id          String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  tenantId    String?  @map("tenant_id") @db.Uuid
+  actorUserId String?  @map("actor_user_id") @db.Uuid
+  actorRole   String?  @map("actor_role")
+  action      String
+  entity      String
+  entityId    String?  @map("entity_id")
+  before      Json?
+  after       Json?
+  ip          String?
+  userAgent   String?  @map("user_agent")
+  requestId   String?  @map("request_id")
+  hash        String?
+  prevHash    String?  @map("prev_hash")
+
+  @@id([id, createdAt])
+  @@index([tenantId, entity, entityId])
+  @@index([tenantId, actorUserId])
+  @@map("audit_log")
+  @@schema("audit")
+}
+
+// ═════════════════════════════════════════════════════════════ integration ══
+
+model ExternalId {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  source          String
+  entity          String
+  externalId      String    @map("external_id")
+  localId         String    @map("local_id") @db.Uuid
+  contentHash     String    @map("content_hash")
+  syncedAt        DateTime  @default(now()) @map("synced_at") @db.Timestamptz(6)
+  sourceUpdatedAt DateTime? @map("source_updated_at") @db.Timestamptz(6)
+  missingSince    DateTime? @map("missing_since") @db.Timestamptz(6)
+
+  @@unique([tenantId, source, entity, externalId])
+  @@index([tenantId, entity, localId])
+  @@map("external_ids")
+  @@schema("integration")
+}
+
+model SyncRun {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  source            String
+  kind              String
+  status            String    @default("RUNNING")
+  startedAt         DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt        DateTime? @map("finished_at") @db.Timestamptz(6)
+  inserted          Int       @default(0)
+  updated           Int       @default(0)
+  skipped           Int       @default(0)
+  deactivated       Int       @default(0)
+  errors            Int       @default(0)
+  details           Json      @default("{}")
+  triggeredByUserId String?   @map("triggered_by_user_id") @db.Uuid
+  conflicts         SyncConflict[]
+
+  @@index([tenantId, startedAt])
+  @@map("sync_runs")
+  @@schema("integration")
+}
+
+model SyncConflict {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  syncRunId  String    @map("sync_run_id") @db.Uuid
+  entity     String
+  externalId String    @map("external_id")
+  kind       String
+  details    Json      @default("{}")
+  status     String    @default("OPEN")
+  resolvedBy String?   @map("resolved_by") @db.Uuid
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  syncRun    SyncRun   @relation(fields: [syncRunId], references: [id])
+
+  @@index([tenantId, status])
+  @@map("sync_conflicts")
+  @@schema("integration")
+}
+
+model FieldOwnership {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  entity   String
+  field    String
+  owner    String
+
+  @@unique([tenantId, entity, field])
+  @@map("field_ownership")
+  @@schema("integration")
+}
+
+model WebhookEvent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  direction   String
+  source      String
+  event       String
+  payload     Json
+  status      String    @default("PENDING")
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
+
+  @@index([tenantId, status])
+  @@map("webhook_events")
+  @@schema("integration")
+}
+
+model IntegrationSetting {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  provider  String
+  enabled   Boolean  @default(false)
+  config    Json     @default("{}")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, provider])
+  @@map("integration_settings")
+  @@schema("integration")
+}
+
+model Job {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String?   @map("tenant_id") @db.Uuid
+  name        String
+  payload     Json      @default("{}")
+  status      String    @default("PENDING")
+  runAt       DateTime  @default(now()) @map("run_at") @db.Timestamptz(6)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5) @map("max_attempts")
+  lastError   String?   @map("last_error")
+  lockedAt    DateTime? @map("locked_at") @db.Timestamptz(6)
+  lockedBy    String?   @map("locked_by")
+  dedupeKey   String?   @unique @map("dedupe_key")
+  result      Json?
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  finishedAt  DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  @@index([status, runAt])
+  @@map("jobs")
+  @@schema("integration")
+}

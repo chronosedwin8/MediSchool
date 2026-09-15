@@ -1,0 +1,26 @@
+[
+  {
+    "poll_id": 114, "person_id": 90003, "person_document": 1100000003, "person": "SOFÍA MARTÍNEZ RUIZ", "section": "KLASSE 5 K5A", "status": "activo",
+    "timestamp": "2026-09-01 10:20:00", "author": "ENFERMERA DEMO",
+    "Profesor que remite": "DOCENTE DEMO", "Hora y fecha de ingreso": "2026-09-01 10:05:00", "Fecha y hora de la atención": "2026-09-01 10:07:00",
+    "De donde se remite ": "3 Hora", "Tipo de Atención": "Enfermedad general", "Motivo de Atención": "Dolor de cabeza",
+    "Descripción de la Atención": "<p>Estudiante refiere cefalea. Reposo e hidrataci&oacute;n. Retorna al sal&oacute;n.</p>",
+    "Nombre del medicamento": "NO", "Tipo de Accidente": "No Aplica", "Zona o Juego": "No Aplica", "Sección": "Primaria", "Accidente/Incidente": "N/A", "Quien Atiende": "Enfermera Demo"
+  },
+  {
+    "poll_id": 114, "person_id": 90006, "person_document": 1100000006, "person": "VALENTINA HERRERA SOTO", "section": "KLASSE 8 K8B", "status": "activo",
+    "timestamp": "2026-09-02 12:40:00", "author": "ENFERMERA DEMO",
+    "Profesor que remite": "DOCENTE DEMO", "Hora y fecha de ingreso": "2026-09-02 12:30:00", "Fecha y hora de la atención": "2026-09-02 12:31:00",
+    "De donde se remite ": "Recreo", "Tipo de Atención": "Incidente", "Motivo de Atención": "Raspadura",
+    "Descripción de la Atención": "Raspadura en rodilla durante recreo. Lavado y curación.",
+    "Nombre del medicamento": "", "Tipo de Accidente": "Leve", "Zona o Juego": "Polideportivo", "Sección": "Secundaría", "Accidente/Incidente": "Incidente", "Quien Atiende": "Enfermera Demo"
+  },
+  {
+    "poll_id": 114, "person_id": 99999, "person_document": 1199999999, "person": "ANDRÉS FELIPE GIL NARANJO", "section": "KLASSE 11 K11A", "status": "retirado",
+    "timestamp": "2026-03-02 08:40:00", "author": "ENFERMERA DEMO",
+    "Profesor que remite": "", "Hora y fecha de ingreso": "2026-03-02 08:30:00", "Fecha y hora de la atención": "false",
+    "De donde se remite ": "1 Hora", "Tipo de Atención": "Enfermedad general", "Motivo de Atención": "Malestar general",
+    "Descripción de la Atención": "Malestar general.", "Nombre del medicamento": "ACETAMINOFEN TB 500MG",
+    "Tipo de Accidente": "No Aplica", "Zona o Juego": "No Aplica", "Sección": "Secundaría", "Accidente/Incidente": "N/A", "Quien Atiende": "Enfermera Demo"
+  }
+]

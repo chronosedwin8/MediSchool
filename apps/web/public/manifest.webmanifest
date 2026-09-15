@@ -1,0 +1,21 @@
+{
+  "name": "MediSchool — Enfermería escolar",
+  "short_name": "MediSchool",
+  "description": "Gestión de enfermería escolar: atenciones, pases, medicación y comunicación con familias.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f6f3",
+  "theme_color": "#0f6761",
+  "lang": "es-CO",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Nuevo pase", "url": "/docente" },
+    { "name": "Tablero de enfermería", "url": "/enfermeria" },
+    { "name": "Portería", "url": "/porteria" }
+  ]
+}

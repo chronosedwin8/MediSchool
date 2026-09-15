@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 20
+    env:
+      DATABASE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/sgee
+      DATABASE_URL: postgresql://sgee_app:ci-app-pass@localhost:5432/sgee
+      TEST_DATABASE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/sgee_test
+      TEST_DATABASE_URL: postgresql://sgee_app:ci-app-pass@localhost:5432/sgee_test
+      DB_APP_PASSWORD: ci-app-pass
+      JWT_SECRET: ci-jwt-secret-with-more-than-thirty-two-characters
+      DATA_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      PHIDIAS_MOCK: "true"
+      TZ: America/Bogota
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema packages/db/prisma/schema.prisma
+      - run: cp .env.example .env
+      - name: Database (migrations, RLS, triggers)
+        run: npx tsx packages/db/scripts/setup.ts --no-seed
+        working-directory: packages/db
+      - run: npm run build:packages
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: Tests (unit + integration)
+        run: |
+          npm run test -w @sgee/shared
+          cd apps/api && npx vitest run
+      - run: npm run build -w @sgee/api && npm run build -w @sgee/web
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm audit --omit=dev --audit-level=high || true
+      - name: SBOM
+        run: npx --yes @cyclonedx/cyclonedx-npm --output-file sbom.json || true
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom, path: sbom.json, if-no-files-found: ignore }

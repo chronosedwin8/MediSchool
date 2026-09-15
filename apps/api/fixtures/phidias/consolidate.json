@@ -1,0 +1,63 @@
+[
+  {
+    "id": 17,
+    "name": "KINDERGARTEN",
+    "courses": [
+      {
+        "id": 81,
+        "name": "KINDER",
+        "sections": [
+          {
+            "id": 317,
+            "name": "KIN1",
+            "students": [
+              { "id": 90001, "code": 9001, "document": 1100000001, "idtype": 4, "gender": 0, "firstname": "LUCÍA", "lastname": "PÉREZ GÓMEZ", "birthday": 1590987600, "email": "familia.perez@example.com", "phone": 3000001, "mobile": 573000000001, "address": "Calle 1 # 2-3", "nationality": "D_CO", "_changed": "2026-08-01 10:00:00", "enrollment": { "status": "activo" } },
+              { "id": 90002, "code": 9002, "document": 1100000002, "idtype": 4, "gender": 1, "firstname": "MATEO", "lastname": "ROJAS DÍAZ", "birthday": 1593666000, "email": "", "phone": 0, "mobile": 573000000002, "address": "", "nationality": "D_CO", "_changed": "0000-00-00 00:00:00", "enrollment": { "status": "activo" } }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 18,
+    "name": "PRIMARIA",
+    "courses": [
+      {
+        "id": 86,
+        "name": "KLASSE 5",
+        "sections": [
+          {
+            "id": 336,
+            "name": "K5A",
+            "students": [
+              { "id": 90003, "code": 9003, "document": 1100000003, "idtype": 1, "gender": 0, "firstname": "SOFÍA", "lastname": "MARTÍNEZ RUIZ", "birthday": 1471237200, "email": "sofia.m@example.com", "mobile": 573000000003, "nationality": "D_CO", "_changed": "2026-08-10 09:00:00", "enrollment": { "status": "activo" } },
+              { "id": 90004, "code": 9004, "document": 1100000004, "idtype": 1, "gender": 1, "firstname": "SAMUEL", "lastname": "CASTRO LEÓN", "birthday": 1468472400, "email": "", "mobile": 573000000004, "nationality": "D_CO", "_changed": "2026-08-10 09:00:00", "enrollment": { "status": "inscrito" } },
+              { "id": 90005, "code": null, "document": 1100000005, "idtype": 1, "gender": 1, "firstname": "TOMÁS", "lastname": "VEGA ARIAS", "birthday": 1466053200, "email": "", "mobile": 0, "nationality": "D_CO", "_changed": "2026-08-10 09:00:00", "enrollment": { "status": "pendiente" } }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 19,
+    "name": "SECUNDARIA",
+    "courses": [
+      {
+        "id": 89,
+        "name": "KLASSE 8",
+        "sections": [
+          {
+            "id": 349,
+            "name": "K8B",
+            "students": [
+              { "id": 90006, "code": 9006, "document": 1100000006, "idtype": 1, "gender": 0, "firstname": "VALENTINA", "lastname": "HERRERA SOTO", "birthday": 1375333200, "email": "vale.h@example.com", "mobile": 573000000006, "nationality": "D_CO", "_changed": "2026-08-10 09:00:00", "enrollment": { "status": "activo" } },
+              { "id": 90007, "code": 9007, "document": 1100000007, "idtype": 1, "gender": 1, "firstname": "DANIEL", "lastname": "MORALES PAZ", "birthday": 1372654800, "email": "", "mobile": 573000000007, "nationality": "D_CO", "_changed": "2026-08-10 09:00:00", "enrollment": { "status": "retirado" } }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
