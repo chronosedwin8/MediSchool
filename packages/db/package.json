@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "@faker-js/faker": "9.9.0",
-    "@types/node": "^22.15.0",
+    "@types/node": "^26.5.1",
     "@types/pg": "^8.15.0",
     "dotenv-cli": "^8.0.0",
     "pg": "^8.16.0",
